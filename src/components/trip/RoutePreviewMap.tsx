@@ -3,7 +3,7 @@ import React, { useMemo, useState } from 'react';
 import { StyleSheet, View, TouchableOpacity, Text } from 'react-native';
 import MapboxGL from '@rnmapbox/maps';
 import { config } from '../../constants/config';
-import { FontAwesome5, Feather } from '@expo/vector-icons';
+import { FontAwesome5, Feather, MaterialCommunityIcons } from '@expo/vector-icons'; // ✅ Added MaterialCommunityIcons
 import { useTripDraftStore } from '../../store/useTripDraftStore';
 import { LocationPoint, Stopover } from '../../types/trips';
 import { Colors } from '../../theme/colors';
@@ -25,13 +25,23 @@ interface Props {
   endPoint?: LocationPoint | null;
   stopovers?: Omit<Stopover, 'id'>[];
   routeGeometry?: any | null;
-  showWeatherButton?: boolean; // ✅ NEW PROP
+  showWeatherButton?: boolean;
 }
+
+// ✅ Added the same helper from the Weather Along Route page
+const getWeatherIcon = (condition: string) => {
+  switch (condition) {
+    case 'Rain': return 'weather-pouring';
+    case 'Clouds': return 'weather-cloudy';
+    case 'Clear': return 'weather-sunny';
+    default: return 'weather-partly-cloudy';
+  }
+};
 
 export function RoutePreviewMap({ 
   onMaximize, onClose, isFullScreen = false, weatherPins = [],
   startPoint, endPoint, stopovers, routeGeometry,
-  showWeatherButton = false // ✅ Default to false
+  showWeatherButton = false
 }: Props) {
   const draft = useTripDraftStore();
   const [showWeather, setShowWeather] = useState(false);
@@ -115,15 +125,13 @@ export function RoutePreviewMap({
             key={`weather-${index}`} 
             id={`weather-${index}`} 
             coordinate={[pin.longitude, pin.latitude]}
-            anchor={{ x: 0.5, y: 0.5 }}>
-            <View style={styles.weatherPinWrapper}>
-              <View style={styles.weatherPin}>
-                <Text style={styles.weatherIcon}>
-                  {pin.condition === 'Rain' ? '🌧️' : pin.condition === 'Clouds' ? '☁️' : '☀️'}
-                </Text>
-                <Text style={styles.weatherTemp}>{pin.temp}°C</Text>
-                <Text style={styles.weatherEta}>{pin.eta || '--:--'}</Text>
-              </View>
+            anchor={{ x: 0.5, y: 1.1 }} // ✅ Shifts pin up slightly so it doesn't block the line
+          >
+            {/* ✅ Clean Card Design */}
+            <View style={styles.weatherPin}>
+              <MaterialCommunityIcons name={getWeatherIcon(pin.condition) as any} size={20} color={Colors.black} />
+              <Text style={styles.pinTemp}>{pin.temp}°C</Text>
+              <Text style={styles.pinEta}>{pin.eta || '--:--'}</Text>
             </View>
           </MapboxGL.PointAnnotation>
         ))}
@@ -156,9 +164,19 @@ export function RoutePreviewMap({
 }
 
 const styles = StyleSheet.create({
-  container: { height: 180, borderRadius: 16, overflow: 'hidden', backgroundColor: Colors.offWhite },
-  fullScreenContainer: { flex: 1, backgroundColor: Colors.offWhite }, 
-  map: { flex: 1 },
+  container: {
+    height: 180,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: Colors.offWhite
+  },
+  fullScreenContainer: {
+    flex: 1,
+    backgroundColor: Colors.offWhite
+  }, 
+  map: {
+    flex: 1
+  },
   actionBtn: { 
     position: 'absolute', 
     width: 44, 
@@ -168,7 +186,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center', 
     alignItems: 'center',
     elevation: 5, 
-    shadowColor:  Colors.black, 
+    shadowColor: Colors.black, 
     shadowOpacity: 0.2, 
     shadowRadius: 4 
   },
@@ -184,43 +202,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  weatherPinWrapper: {
-    width: 160,   
-    height: 120,  
-    justifyContent: 'center',
+
+  /* ✅ UPDATED WEATHER PIN STYLES */
+  weatherPin: {
+    backgroundColor: Colors.white,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
     alignItems: 'center',
-  },
-  weatherPin: { 
-    position: 'absolute',
-    left: 85,    
-    top: 25,     
-    backgroundColor: Colors.offWhite, 
-    flexDirection: 'column', 
-    alignItems: 'center', 
-    paddingHorizontal: 8, 
-    paddingVertical: 6, 
-    borderRadius: 12, 
-    elevation: 6, 
-    shadowColor: Colors.black, 
-    shadowOffset: { width: 0, height: 2 }, 
-    shadowOpacity: 0.3, 
-    shadowRadius: 3, 
-    borderWidth: 1, 
+    elevation: 4,
+    borderWidth: 1,
     borderColor: Colors.lightGray,
+    marginBottom: 10, 
   },
-  weatherIcon: {
-    fontSize: 16,
-    marginBottom: 2,
+  pinTemp: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.black
   },
-  weatherTemp: { 
-    fontSize: 12, 
-    fontWeight: '700', 
-    color: Colors.black,
-    marginBottom: 2,
-  },
-  weatherEta: {
+  pinEta: {
     fontSize: 10,
     color: Colors.muted,
-    fontWeight: '500',
+    marginTop: 2
   },
 });

@@ -11,6 +11,7 @@ import {
   // verifyPasswordResetEmail,
   confirmPasswordReset,
   ActionCodeSettings,
+  updateProfile,
 } from '@react-native-firebase/auth';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { getFirebaseAuth } from './firebase';
@@ -62,11 +63,14 @@ export async function registerWithEmailPassword(input: RegistrationInput): Promi
     input.password,
   );
 
+  await updateProfile(credential.user, { displayName: input.name });
+
+
   await saveRiderProfile(credential.user.uid, {
     name: input.name,
     email: input.email,
     phone: input.phone,
-    role: 'member',
+   // role: 'member',
   });
 }
 

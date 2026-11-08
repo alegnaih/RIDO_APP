@@ -1,3 +1,4 @@
+import { GestureHandlerRootView } from 'react-native-gesture-handler'; 
 import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -8,12 +9,12 @@ import { ThemeProvider } from '../src/contexts/ThemeContext';
 import { useAuth } from '../src/hooks/useAuth';
 import { config } from '../src/constants/config';
 
+
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 // Set once for the whole process — no component needs to repeat this.
 const rawToken = config.mapboxAccessToken || process.env.mapboxAccessToken;
 const token = rawToken?.trim()
-
 
 if (token) 
 {
@@ -29,6 +30,7 @@ export default function RootLayout() {
   useEffect(() => initialize(), [initialize]);
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaProvider>
       <ThemeProvider>
         <StatusBar style="light" />
@@ -46,5 +48,6 @@ export default function RootLayout() {
         </Stack>
       </ThemeProvider>
     </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

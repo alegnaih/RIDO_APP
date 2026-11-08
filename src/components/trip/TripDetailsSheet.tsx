@@ -46,9 +46,8 @@ export function TripDetailsSheet({
   const onTimeChange = (event: DateTimePickerEvent, selectedTime?: Date) => {
     if (Platform.OS === 'android') setShowTimePicker(false);
     
-    if (selectedTime) {
+    if (event.type === 'set') {
       const timeToUse = selectedTime || new Date();
-    
       const newDate = date ? new Date(date) : new Date();
       newDate.setHours(timeToUse.getHours());
       newDate.setMinutes(timeToUse.getMinutes());

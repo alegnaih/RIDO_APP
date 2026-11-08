@@ -78,7 +78,8 @@ const isEditing = !!draft.editingTripId;
           routeGeometry: draft.routeGeometry, // Make sure createTrip saves this too!
           totalDistance: draft.totalDistance, // Make sure createTrip saves this too!
           routeLegDistances: draft.routeLegDistances,
-          routeLegDurations: draft.routeLegDurations
+          routeLegDurations: draft.routeLegDurations,
+          creatorName: user?.name || user?.email?.split('@')[0] || 'Leader', 
         });
         setCreatedTrip({ id: trip.id, code: trip.shareCode });
       }
@@ -181,11 +182,8 @@ const isEditing = !!draft.editingTripId;
                 const newDate = draft.date ? new Date(draft.date) : new Date();
                 newDate.setHours(date.getHours());
                 newDate.setMinutes(date.getMinutes());
-                newDate.setSeconds(0);
-                draft.setDetails(draft.title, newDate, date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
-              
+                newDate.setSeconds(0);              
                 const formatted = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-                
                 draft.setDetails(draft.title, newDate, formatted);
               }
             }}

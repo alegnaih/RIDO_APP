@@ -67,10 +67,14 @@ export function useAuth() {
       
         try {
           const riderProfile = await fetchRiderProfile(signedInUser.uid);
-          setUser(riderProfile ?? fallback);
+          setUser({
+            ...fallback,
+            ...riderProfile,
+            name: riderProfile?.name || signedInUser.displayName || signedInUser.email?.split('@')[0] || '',
+          });
           setLoading(false);
         }
-
+        
       catch (caught) {
         setError(getAuthErrorMessage(caught, 'Could not load your rider profile.'));
         setUser(fallback);
@@ -111,12 +115,19 @@ export function useAuth() {
   );
 
   const signUpWithEmail = useCallback(
-    (name: string, email: string, password: string, phone: string) =>
-      runAuthAction(
+    async (name: string, email: string, password: string, phone: string) => {
+      const success = await runAuthAction(
         () => registerWithEmailPassword({ name, email, password, phone }),
         'Failed to create your account.',
-      ),
-    [runAuthAction],
+      );
+      
+      // ✅ FIX: Force the local store to update with the name immediately
+      if (success) {
+        updateUser({ name });
+      }
+      return success;
+    },
+    [runAuthAction, updateUser],
   );
 
   const signInWithGoogle = useCallback(

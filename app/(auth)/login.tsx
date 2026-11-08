@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, View, Text, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/hooks/useAuth';
@@ -9,91 +9,57 @@ import { RoadButton } from '../../src/components/ui/RoadButton';
 import { GoogleSigninButton } from '../../src/components/auth/GoogleSigninButton';
 import { Colors } from '../../src/theme/colors';
 
-/* function getDigits(v: string) {
-  return v.replace(/\D/g, '');
-} 
-
-function looksLikePhone(v: string): boolean {
-  const trimmed = v.trim();
-  if (!trimmed) return false;
-  if (!/^\+?[\d\s\-()]+$/.test(trimmed)) return false;
-  const d = getDigits(trimmed);
-  return d.length >= 7 && d.length <= 15;
-} 
-
-function looksLikeEmail(v: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
-} */
-
 export default function LoginScreen() {
   const router = useRouter();
-  const { signInWithEmail, signInWithGoogle, error, clearError, isLoading, isAuthenticated } =
-    useAuth();
+  const { signInWithEmail, signInWithGoogle, error, clearError, isLoading } = useAuth();
 
-  const [email, setemail ] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Fires for every sign-in method, including the ones that complete without
-  // this screen calling anything (Google, phone, restored session).
- useEffect(() => {
-    if (isAuthenticated) {
-      router.replace('/(tabs)/map');
-    }
-  }, [isAuthenticated, router]); 
-
-  // const isPhoneMode = looksLikePhone(email);
-
   const clearMessages = () => {
-    if (formError) {setFormError(null);}
-    if (error) {clearError();}
+    if (formError) setFormError(null);
+    if (error) clearError();
   };
 
-  const handleLogin = async () => 
-    {
+  const handleLogin = async () => {
     clearMessages();
     const value = email.trim();
-  
-   /*if (!value) 
-    {
-      setFormError('Enter your email address.');
-      return;
-    }
 
-    if (isPhoneMode) {
-      router.push(`/(auth)/phone-verify?phone=${encodeURIComponent(value)}`);
-      return;
-    } */
-
-    if (!value.includes('@')) 
-    {
+    // ✅ 1. Validate FIRST
+    if (!value.includes('@')) {
       setFormError('Enter a valid email address.');
       return;
     }
-
-    if (!password)
-    {
+    if (!password) {
       setFormError('Enter your password.');
-        return;
+      return;
     }
 
-    await signInWithEmail(value, password);
-
-    /*const success = await signInWithEmail(value, password);
-    if (success) router.replace('/(tabs)/map'); */
+    // ✅ 2. Call API ONCE
+    const success = await signInWithEmail(value, password);
+    
+    // ✅ 3. Redirect on success
+    if (success) {
+      router.replace('/(tabs)/map');
+    }
   };
 
   const handleGoogle = async () => {
     clearMessages();
-    clearMessages();
-    await signInWithGoogle();
-   // if (success) router.replace('/(tabs)/map');
+    
+    // ✅ 1. Call API ONCE
+    const success = await signInWithGoogle();
+    
+    // ✅ 2. Redirect on success
+    if (success) {
+      router.replace('/(tabs)/map');
+    }
   };
 
   const canSubmit = Boolean(email.trim()) && Boolean(password) && !isLoading;
-  const message = formError ?? error;
 
-return (
+  return (
     <KeyboardAvoidingView
       style={styles.screen}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -103,12 +69,12 @@ return (
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Logo / header (was the two <Image /> blocks in the design) ── */}
+        {/* Logo / header */}
         <View style={styles.logoWrap}>
           <Image style={styles.logo} source={require('../../assets/icon.png')} />
         </View>
 
-        {/* ── Log In / Sign Up segmented tabs ── */}
+        {/* Log In / Sign Up segmented tabs */}
         <View style={styles.tabs}>
           <Pressable
             style={[styles.tab, styles.tabActive]}
@@ -116,7 +82,7 @@ return (
             accessibilityRole="button"
             accessibilityState={{ selected: true }}
           >
-           <Text style={[styles.tabText, styles.tabTextActive]}>Log In</Text>
+            <Text style={[styles.tabText, styles.tabTextActive]}>Log In</Text>
           </Pressable>
 
           <Pressable
@@ -130,12 +96,12 @@ return (
           </Pressable>
         </View>
 
-        {/* ── Fields ── */}
+        {/* Fields */}
         <View style={styles.fieldWrap}>
           <AuthTextField
             value={email}
             onChangeText={(value) => {
-              setemail(value);
+              setEmail(value);
               clearMessages();
             }}
             placeholder="Email"
@@ -163,17 +129,17 @@ return (
           />
         </View>
 
-        {/* ── Forget Password? (right aligned, 11px in the design) ── */}
-       
-          <View style={styles.forgotWrap}>
-            <AuthLink
-              label="Forget Password?"
-              onPress={() => router.push('/(auth)/forget-pw')}
-            />
-          </View>
+        {/* Forget Password? */}
+        <View style={styles.forgotWrap}>
+          <AuthLink
+            label="Forget Password?"
+            onPress={() => router.push('/(auth)/forget-pw')}
+          />
+        </View>
 
         {(formError ?? error) ? (
-          <Text style={styles.error}>{formError ?? error}</Text>) : null} 
+          <Text style={styles.error}>{formError ?? error}</Text>
+        ) : null}
 
         <View style={styles.buttonWrap}>
           <RoadButton
@@ -183,17 +149,15 @@ return (
             loading={isLoading}
           />
         </View>
-        
-        {/* ── Primary action ── */}
-  
+
         <AuthDivider label="or" />
 
-        {/* ── Google ── */}
+        {/* Google */}
         <View style={styles.buttonWrap}>
           <GoogleSigninButton onPress={handleGoogle} loading={isLoading} />
         </View>
 
-          <View style={styles.bgWrap}>
+        <View style={styles.bgWrap}>
           <Image style={styles.bgImage} source={require('../../assets/bottom-bg.png')} resizeMode="cover" />
         </View>
       </ScrollView>
@@ -212,8 +176,6 @@ const styles = StyleSheet.create({
     paddingTop: 56,
     paddingBottom: 32,
   },
-
-  /* Header */
   logoWrap: {
     alignItems: 'center',
     marginBottom: 32,
@@ -221,10 +183,7 @@ const styles = StyleSheet.create({
   logo: {
     width: 193,
     height: 152,
-   // resizeMode: 'contain',
   },
-
-  /* Tabs — 156x39, radius 9 */
   tabs: {
     flexDirection: 'row',
     alignSelf: 'center',
@@ -251,24 +210,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: Colors.black,
-    // fontFamily: Poppins_600SemiBold,
   },
   tabTextActive: {
     color: Colors.white,
   },
-
-  /* Fields — 327x41, radius 10 */
   fieldWrap: {
     alignSelf: 'center',
     width: 328,
     height: 41,
     justifyContent: 'center',
-    
     marginBottom: 12,
-    color: Colors.black,
   },
-
-  /* Forget Password? — 11px, right aligned */
   forgotWrap: {
     alignSelf: 'center',
     width: '100%',
@@ -277,7 +229,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
     marginBottom: 12,
   },
-
   error: {
     alignSelf: 'center',
     width: '100%',
@@ -286,16 +237,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.errorRed,
   },
-
-  /* Primary button — 330x44, radius 10 */
-  buttonWrap: 
-  {
+  buttonWrap: {
     alignSelf: 'center',
     width: 327,
-    height:40.7,
+    height: 40.7,
     marginBottom: 10,
   },
-
   bgWrap: {
     position: 'absolute',
     bottom: 0,
@@ -305,9 +252,7 @@ const styles = StyleSheet.create({
     height: 226,
     zIndex: -1,
   },
-
-  bgImage: 
-  {
+  bgImage: {
     width: 412,
     height: 226,
   },

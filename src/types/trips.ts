@@ -38,5 +38,8 @@ export interface Trip {
   isPublic: boolean;
   inviteLink?: string;
   strayThreshold?: number; // in meters, optional
-  routeGeometry?: any; // GeoJSON LineString, optional
+  totalDistance?: string;
+  routeGeometry?: any;
+  routeLegDistances?: string[];
+  routeLegDurations?: number[];
 }

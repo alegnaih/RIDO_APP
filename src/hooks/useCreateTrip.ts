@@ -26,7 +26,7 @@ export function useCreateTrip(initialMode: SheetMode = 'details') {
     if (val) {
       timeString = val.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
     }
-    draft.setDetails(draft.title, val, draft.startTime);
+    draft.setDetails(draft.title, val, timeString);
   };
 
   const startTime = draft.startTime;

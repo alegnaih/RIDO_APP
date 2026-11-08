@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {Feather} from '@expo/vector-icons';
 import {CreateTripScreen} from "../../src/components/trip/CreateTripScreen";
 import {useRouter} from 'expo-router';
+import {JoinTripModal} from "../../src/components/trip/JoinTripModal";
 
 export default function MapScreen() {
   const { currentCoords } = useLocation();
@@ -22,6 +23,7 @@ export default function MapScreen() {
   const [liveLocation, setLiveLocation] = useState<[number, number] | null>(null);
   //const [isCreateTripOpen, setIsCreateTripOpen] = useState(false); // New state
 
+  const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
 
   const handleCreateTrip = () => {
     router.push('/create-trip');
@@ -29,7 +31,7 @@ export default function MapScreen() {
 
 
   const handleJoinTrip = () => {
-  
+      setIsJoinModalOpen(true);
   };
   
    const handleRecenter = () => {
@@ -72,6 +74,16 @@ export default function MapScreen() {
           style={styles.actionButton}
         />
       </View>
+
+      <JoinTripModal 
+        visible={isJoinModalOpen}
+        onClose={() => setIsJoinModalOpen(false)}
+        onSuccess={(tripId) => {
+          setIsJoinModalOpen(false);
+          router.push(`/trip/${tripId}`); // Take them straight to the Trip Details page
+        }}
+      />
+
     </View>
   );
 }

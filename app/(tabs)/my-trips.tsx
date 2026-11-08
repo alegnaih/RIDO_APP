@@ -1,6 +1,6 @@
 // app/(tabs)/my-trips.tsx
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, SectionList } from 'react-native';
 import { useRouter } from 'expo-router';
 import { getFirestore, collection, query, where, onSnapshot } from '@react-native-firebase/firestore';
 import { Feather } from '@expo/vector-icons';
@@ -10,43 +10,66 @@ import { useAuth } from '../../src/hooks/useAuth';
 import { Trip } from '../../src/types/trips';
 import { Colors } from '../../src/theme/colors';
 
+interface TripSection {
+  title: string;
+  data: Trip[];
+}
+
 export default function MyTripsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
 
-  const [trips, setTrips] = useState<Trip[]>([]);
+  const [sections, setSections] = useState<TripSection[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!user?.uid) {
-      setTrips([]);
+      setSections([]);
       setLoading(false);
       return;
     }
 
     const db = getFirestore();
-    
-    // ✅ Fetch all trips where the user is in the 'members' array
-    const q = query(
-      collection(db, 'trips'),
-      where('members', 'array-contains', user.uid)
-    );
+    const q = query(collection(db, 'trips'), where('members', 'array-contains', user.uid));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const fetchedTrips: Trip[] = [];
+      const ongoing: Trip[] = [];
+      const upcoming: Trip[] = [];
+      const completed: Trip[] = [];
+      const now = new Date().getTime();
+
       snapshot.forEach((doc) => {
-        fetchedTrips.push({ id: doc.id, ...doc.data() } as Trip);
+        const trip = { id: doc.id, ...doc.data() } as Trip;
+        const tripDate = trip.scheduledAt?.toDate()?.getTime() || 0;
+
+        if (trip.status === 'active') {
+          ongoing.push(trip);
+        } else if (trip.status === 'completed' || trip.status === 'cancelled') {
+          completed.push(trip);
+        } else if (trip.status === 'planned') {
+          // If it's planned but the date has passed, you can choose to put it in completed or upcoming.
+          // We'll keep it in upcoming for now unless the user explicitly ended it.
+          upcoming.push(trip);
+        }
       });
 
-      // Sort by scheduled date (Newest first)
-      fetchedTrips.sort((a, b) => {
-        const dateA = a.scheduledAt?.toDate()?.getTime() || 0;
-        const dateB = b.scheduledAt?.toDate()?.getTime() || 0;
-        return dateB - dateA;
-      });
+      // ✅ Sort Ongoing: Just by date
+      ongoing.sort((a, b) => (a.scheduledAt?.toDate()?.getTime() || 0) - (b.scheduledAt?.toDate()?.getTime() || 0));
 
-      setTrips(fetchedTrips);
+      // ✅ Sort Upcoming: Closest date first (Ascending)
+      upcoming.sort((a, b) => (a.scheduledAt?.toDate()?.getTime() || 0) - (b.scheduledAt?.toDate()?.getTime() || 0));
+
+      // ✅ Sort Completed: Most recent first (Descending)
+      completed.sort((a, b) => (b.scheduledAt?.toDate()?.getTime() || 0) - (a.scheduledAt?.toDate()?.getTime() || 0));
+
+      // Build sections, only adding them if they have data
+      const newSections: TripSection[] = [];
+      if (ongoing.length > 0) newSections.push({ title: 'Ongoing', data: ongoing });
+      if (upcoming.length > 0) newSections.push({ title: 'Upcoming', data: upcoming });
+      if (completed.length > 0) newSections.push({ title: 'Completed', data: completed });
+
+      setSections(newSections);
       setLoading(false);
     }, (error) => {
       console.error("Error fetching trips:", error);
@@ -68,69 +91,90 @@ export default function MyTripsScreen() {
     );
   }
 
+  const isEmpty = sections.length === 0;
+
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={[styles.content, { paddingTop: insets.top + 20 }]}>
+      {/* ✅ Use SectionList instead of ScrollView */}
+      <SectionList
+        sections={sections}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + 20 }]}
+        stickySectionHeadersEnabled={false}
         
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>My Trips</Text>
-          <TouchableOpacity style={styles.addBtn} onPress={handleCreateTrip}>
-            <Feather name="plus" size={20} color={Colors.lightSurface} />
-          </TouchableOpacity>
-        </View>
-
-        {/* Empty State */}
-        {trips.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Feather name="map" size={48} color={Colors.muted} />
-            <Text style={styles.emptyText}>No trips yet</Text>
-            <Text style={styles.emptySub}>Create a trip to start riding with your convoy.</Text>
-            <TouchableOpacity style={styles.createBtn} onPress={handleCreateTrip}>
-              <Text style={styles.createBtnText}>Create Trip</Text>
+        // Header (Title + Add Button)
+        ListHeaderComponent={
+          <View style={styles.header}>
+            <Text style={styles.headerTitle}>My Trips</Text>
+            <TouchableOpacity style={styles.addBtn} onPress={handleCreateTrip}>
+              <Feather name="plus" size={20} color="#FFF" />
             </TouchableOpacity>
           </View>
-        ) : (
-          /* Trips List */
-          <View style={styles.tripList}>
-            {trips.map((trip) => {
-              const startDate = trip.scheduledAt?.toDate() || new Date();
-              const dateStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-              const isLeader = trip.createdBy === user?.uid;
+        }
 
-              return (
-                <TouchableOpacity 
-                  key={trip.id} 
-                  style={styles.tripCard}
-                  onPress={() => router.push(`/trip/${trip.id}`)}
-                >
-                  <View style={styles.cardHeader}>
-                    <Text style={styles.tripTitle}>{trip.title}</Text>
-                    <Text style={styles.codeText}>#{trip.shareCode}</Text>
-                  </View>
-                  
-                  <View style={styles.cardDetails}>
-                    <Text style={styles.detailText}>
-                      <Feather name="calendar" size={12} /> {dateStr} at {trip.startTime}
-                    </Text>
-                    <Text style={styles.detailText}>
-                      <Feather name="users" size={12} /> {trip.memberCount || 1} Members
-                    </Text>
-                  </View>
-                  
-                  <View style={styles.cardFooter}>
-                    <View style={styles.roleBadge}>
-                      <Text style={styles.roleText}>{isLeader ? 'LEADER' : 'MEMBER'}</Text>
-                    </View>
-                    <Feather name="chevron-right" size={20} color={Colors.muted} />
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+        // Empty State
+        ListEmptyComponent={
+          isEmpty ? (
+            <View style={styles.emptyState}>
+              <Feather name="map" size={48} color="#CCC" />
+              <Text style={styles.emptyText}>No trips yet</Text>
+              <Text style={styles.emptySub}>Create a trip to start riding with your convoy.</Text>
+              <TouchableOpacity style={styles.createBtn} onPress={handleCreateTrip}>
+                <Text style={styles.createBtnText}>Create Trip</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null
+        }
+
+        // Section Header (e.g., "ONGOING", "UPCOMING", "COMPLETED")
+        renderSectionHeader={({ section: { title } }) => (
+          <Text style={styles.sectionHeader}>{title}</Text>
         )}
 
-      </ScrollView>
+        // Individual Trip Card
+        renderItem={({ item: trip }) => {
+          const startDate = trip.scheduledAt?.toDate() || new Date();
+          const dateStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+          const isLeader = trip.createdBy === user?.uid;
+
+          return (
+            <TouchableOpacity 
+              style={styles.tripCard}
+              onPress={() => router.push(`/trip/${trip.id}`)}
+            >
+              <View style={styles.cardHeader}>
+                <Text style={styles.tripTitle}>{trip.title}</Text>
+                <Text style={styles.codeText}>#{trip.shareCode}</Text>
+              </View>
+              
+              <View style={styles.cardDetails}>
+                <Text style={styles.detailText}>
+                  <Feather name="calendar" size={12} /> {dateStr} at {trip.startTime}
+                </Text>
+                <Text style={styles.detailText}>
+                  <Feather name="users" size={12} /> {trip.memberCount || 1} Members
+                </Text>
+              </View>
+              
+              <View style={styles.cardFooter}>
+                <View style={styles.roleBadge}>
+                  <Text style={styles.roleText}>{isLeader ? 'LEADER' : 'MEMBER'}</Text>
+                </View>
+                
+                {/* Show a status indicator if it's ongoing */}
+                {trip.status === 'active' && (
+                  <View style={styles.activeBadge}>
+                    <View style={styles.activeDot} />
+                    <Text style={styles.activeText}>Active</Text>
+                  </View>
+                )}
+                
+                <Feather name="chevron-right" size={20} color="#999" />
+              </View>
+            </TouchableOpacity>
+          );
+        }}
+      />
     </View>
   );
 }
@@ -138,7 +182,7 @@ export default function MyTripsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor:Colors.offWhite,
+    backgroundColor: Colors.offWhite,
   },
   center: {
     flex: 1,
@@ -148,7 +192,7 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 20,
-    paddingBottom: 120, // Ensures the last card isn't hidden behind the floating tab bar
+    paddingBottom: 120, 
   },
   header: {
     flexDirection: 'row',
@@ -162,7 +206,7 @@ const styles = StyleSheet.create({
     color: Colors.black,
   },
   addBtn: {
-    backgroundColor: Colors.darkGreen,
+    backgroundColor: Colors.greenBtn,
     width: 40,
     height: 40,
     borderRadius: 20,
@@ -170,6 +214,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   
+  /* Section Headers */
+  sectionHeader: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.muted,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginTop: 16,
+    marginBottom: 12,
+  },
+
   /* Empty State */
   emptyState: {
     alignItems: 'center',
@@ -178,45 +233,43 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 18,
     fontWeight: '700',
-    color: Colors.black,
+    color: '#333',
     marginTop: 16,
   },
   emptySub: {
     fontSize: 14,
-    color: Colors.muted,
+    color: '#888',
     marginTop: 8,
     textAlign: 'center',
     paddingHorizontal: 40,
     lineHeight: 20,
   },
   createBtn: {
-    backgroundColor: Colors.darkGreen,
+    backgroundColor: Colors.greenBtn,
     paddingVertical: 14,
     paddingHorizontal: 32,
     borderRadius: 24,
     marginTop: 24,
   },
   createBtnText: {
-    color: Colors.offWhite,
+    color: '#FFF',
     fontWeight: '700',
     fontSize: 16,
   },
 
   /* Trip Card */
-  tripList: {
-    gap: 16,
-  },
   tripCard: {
     backgroundColor: Colors.white,
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: Colors.lightGray,
+    borderColor: '#EAEAEA',
     elevation: 2,
-    shadowColor: Colors.black,
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 4,
+    marginBottom: 12,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -233,7 +286,7 @@ const styles = StyleSheet.create({
   codeText: {
     fontSize: 13,
     fontWeight: '700',
-    color: Colors.darkGreen,
+    color: Colors.greenBtn,
     backgroundColor: Colors.greenBg,
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -252,18 +305,42 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     borderTopWidth: 1,
-    borderTopColor: Colors.lightGray,
+    borderTopColor: '#F0F0F0',
     paddingTop: 12,
   },
   roleBadge: {
-    backgroundColor: Colors.greenBg,
+    backgroundColor: '#A5C3B5',
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 25,
+    borderRadius: 6,
   },
   roleText: {
     fontSize: 10,
     fontWeight: '700',
-    color: Colors.darkGreen,
+    color: '#FFF',
+  },
+  
+  /* Active Status Badge */
+  activeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E8F0EA',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginLeft: 'auto',
+    marginRight: 12,
+  },
+  activeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.greenBtn,
+    marginRight: 6,
+  },
+  activeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.greenBtn,
   },
 });
