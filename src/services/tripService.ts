@@ -1,9 +1,25 @@
 // src/services/tripService.ts
-import {addDoc, collection, getDoc, getFirestore, serverTimestamp, Timestamp, updateDoc, doc,
-arrayUnion, increment, query, where, getDocs} from '@react-native-firebase/firestore';
+import {
+  addDoc,
+  collection,
+  getDoc,
+  getFirestore,
+  serverTimestamp,
+  Timestamp,
+  updateDoc,
+  doc,
+  arrayUnion,
+  arrayRemove,
+  increment,
+  query,
+  where,
+  getDocs,
+  deleteDoc,
+} from '@react-native-firebase/firestore';
 import { getAuth } from '@react-native-firebase/auth';
 import { Trip, LocationPoint, Stopover } from '../types/trips'; 
 import { generateShareCode } from '../utils/shareCode';
+import { getTrustedDate } from '../utils/time';
 
 const tripsRef = collection(getFirestore(), 'trips');
 
@@ -38,13 +54,12 @@ export async function createTrip(payload: CreateTripPayload): Promise<Trip> {
     isFromSearch: s.isFromSearch ?? false,
   }));
 
-  
   const docRef = await addDoc(tripsRef, {
     shareCode,
     title: payload.title.trim(),
     description: payload.description || '',
     createdBy: user.uid,
-    createdByName: payload.creatorName || user.displayName || 'Leader', // ✅ Use it here
+    createdByName: payload.creatorName || user.displayName || 'Leader',
     createdAt: now,
     updatedAt: now,
     status: 'planned',
@@ -58,7 +73,7 @@ export async function createTrip(payload: CreateTripPayload): Promise<Trip> {
     stopovers,
     members: [user.uid],
     memberCount: 1,
-    maxMembers: 20,
+    maxMembers: 150,
     isPublic: true,
     strayThreshold: payload.strayThreshold || 50,
     routeGeometry: payload.routeGeometry ? JSON.stringify(payload.routeGeometry) : null,
@@ -78,14 +93,15 @@ export async function updateTrip(tripId: string, updates: Record<string, any>): 
   const db = getFirestore();
   await updateDoc(doc(db, 'trips', tripId), {
     ...updates,
-    updatedAt: serverTimestamp(), // Use serverTimestamp for consistency
+    updatedAt: serverTimestamp(),
   });
 }
 
 export async function joinTripByCode(shareCode: string): Promise<Trip> {
   const user = getAuth().currentUser;
   if (!user) throw new Error('You must be logged in to join a trip.');
-   // 1. Find the trip with this share code
+  
+  // 1. Find the trip with this share code
   const q = query(tripsRef, where('shareCode', '==', shareCode.toUpperCase()));
   const snapshot = await getDocs(q);
 
@@ -96,16 +112,77 @@ export async function joinTripByCode(shareCode: string): Promise<Trip> {
   const tripDoc = snapshot.docs[0];
   const tripData = tripDoc.data() as Trip;
 
-  // 2. Check if the user is already a member
+  // 2. Cut-off time logic
+  if (tripData.scheduledAt) {
+    const scheduledDate = tripData.scheduledAt.toDate();
+    const now = getTrustedDate();
+    
+    const diffMs = scheduledDate.getTime() - now.getTime();
+    const diffMins = diffMs / (1000 * 60);
+
+    if (diffMins <= 0) {
+      throw new Error('Unfortunately, the trip has already ended.');
+    }
+    if (diffMins <= 15) {
+      throw new Error('Unfortunately, the trip is officially closed. The cut-off time is 15 minutes before departure.');
+    }
+  }
+
+  if (tripData.memberCount >= tripData.maxMembers) {
+    throw new Error('This trip is already full.');
+  }
+
+  // 3. Check if the user is already a member
   if (tripData.members.includes(user.uid)) {
     throw new Error('You are already a member of this trip.');
   }
 
-  // 3. Add the user to the members array and increment the count
+  // ✅ 4. CHECK FOR SCHEDULE CLASHES (BEFORE UPDATING THE DATABASE)
+  if (tripData.scheduledAt) {
+    const userTripsQuery = query(tripsRef, where('members', 'array-contains', user.uid));
+    const userTripsSnapshot = await getDocs(userTripsQuery);
+    
+    const newTripTime = tripData.scheduledAt.toDate().getTime();
+    const SIX_HOURS_MS = 6 * 60 * 60 * 1000; 
+
+    for (const doc of userTripsSnapshot.docs) {
+      if (doc.id === tripDoc.id) continue; 
+      
+      const existingTrip = doc.data() as Trip;
+      if (existingTrip.status === 'completed' || existingTrip.status === 'cancelled') continue;
+
+      if (existingTrip.scheduledAt) {
+        const existingTripTime = existingTrip.scheduledAt.toDate().getTime();
+        const timeDifference = Math.abs(newTripTime - existingTripTime);
+
+        // If the new trip is within 6 hours, THROW ERROR AND STOP THE PROCESS
+        if (timeDifference < SIX_HOURS_MS) {
+          throw new Error('SCHEDULE_CLASH');
+        }
+      }
+    }
+  }
+
+  // ✅ 5. ONLY UPDATE DATABASE IF ALL CHECKS PASS
   await updateDoc(doc(getFirestore(), 'trips', tripDoc.id), {
     members: arrayUnion(user.uid),
     memberCount: increment(1),
   });
 
   return { ...tripData, id: tripDoc.id };
+}
+
+export async function deleteTrip(tripId: string): Promise<void> {
+  const db = getFirestore();
+  await deleteDoc(doc(db, 'trips', tripId));
+}
+
+export async function leaveTrip(tripId: string, userId: string): Promise<void> {
+  const db = getFirestore();
+  const tripRef = doc(db, 'trips', tripId);
+
+  await updateDoc(tripRef, {
+    members: arrayRemove(userId),
+    memberCount: increment(-1),
+  });
 }

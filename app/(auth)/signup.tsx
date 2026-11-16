@@ -1,8 +1,9 @@
+// app/(auth)/signup.tsx
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, View, Text, Image, KeyboardAvoidingView, Platform, ScrollView, TouchableOpacity } from 'react-native';
-import { useRouter } from 'expo-router';
+import { StyleSheet, View, Text, Image, KeyboardAvoidingView, Platform, ScrollView, TouchableOpacity, Alert } from 'react-native'; // ✅ Added Alert
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../src/hooks/useAuth';
-import { AuthScreen } from '../../src/components/auth/AuthScreen';
+import { useAuthDraftStore } from '../../src/store/useAuthDraftStore';
 import { AuthTextField } from '../../src/components/auth/AuthTextField';
 import { AuthDivider } from '../../src/components/auth/AuthDivider';
 import { AuthLink } from '../../src/components/auth/AuthLink';
@@ -10,239 +11,229 @@ import { RoadButton } from '../../src/components/ui/RoadButton';
 import { GoogleSigninButton } from '../../src/components/auth/GoogleSigninButton';
 import { isValidPhoneNumber, normalizePhoneNumber } from '../../src/utils/phone';
 import { Colors } from '../../src/theme/colors';
-import { useLocalSearchParams } from 'expo-router';
-
 
 const MINIMUM_PASSWORD_LENGTH = 6;
 
 export default function SignupScreen() {
   const router = useRouter();
   const { verifiedPhone } = useLocalSearchParams<{ verifiedPhone?: string }>();
-  const { signUpWithEmail, signInWithGoogle, error, clearError, isLoading, isAuthenticated } =
-    useAuth();
-
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [phone, setPhone] = useState('');
+  
+  const { signUpWithEmail, signInWithGoogle, signOutGoogle, error, clearError, isLoading, isAuthenticated } = useAuth();
+  
+  const draft = useAuthDraftStore();
   const [formError, setFormError] = useState<string | null>(null);
-  const [isPhoneVerified, setIsPhoneVerified] = useState(false);
-
 
   useEffect(() => {
-  if (verifiedPhone) {
-    setPhone(verifiedPhone);
-    setIsPhoneVerified(true);
-  }
+    if (verifiedPhone) {
+      draft.setField('phone', verifiedPhone);
+      draft.setField('isPhoneVerified', true);
+    }
   }, [verifiedPhone]);
 
   const clearMessages = () => {
-    if (formError) {
-      setFormError(null);
-    }
-    if (error) {
-      clearError();
-    }
+    if (formError) setFormError(null);
+    if (error) clearError();
   };
 
   const handlePhoneChange = (val: string) => {
-    setPhone(val);
+    draft.setField('phone', val);
     clearMessages();
     if (val !== verifiedPhone) {
-      setIsPhoneVerified(false);
+      draft.setField('isPhoneVerified', false);
     }
   };
 
   const validate = (): string | null => {
-    if (!name.trim()) {
-      return 'Enter your full name.';
-    }
-    if (!email.includes('@')) {
+    if (!draft.name.trim()) return 'Enter your full name.';
+    
+    const email = draft.email.trim().toLowerCase();
+    
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
       return 'Enter a valid email address.';
     }
-    if (password.length < MINIMUM_PASSWORD_LENGTH) {
+
+    if (email.endsWith('.con') || email.endsWith('.cmo') || email.endsWith('.cpm')) {
+      return 'Did you mean .com? Please check your email domain.';
+    }
+
+    const badDomains = ['gail.com', 'gamil.com', 'gmaill.com', 'yahoo.con', 'hotmail.con', 'outlook.con'];
+    if (badDomains.some(domain => email.includes(domain))) {
+      return 'Please check your email spelling.';
+    }
+
+    if (draft.password.length < MINIMUM_PASSWORD_LENGTH) {
       return `Password must be at least ${MINIMUM_PASSWORD_LENGTH} characters.`;
     }
-
-    if (password !== confirmPassword){ return 'Passwords do not match.';}
-
-    if (!isValidPhoneNumber(phone)) {
-     return 'Enter a valid mobile number, for example 09171234567.';
+    if (draft.password !== draft.confirmPassword) {
+      return 'Passwords do not match.';
     }
-
-    if (!isPhoneVerified) return 'Please verify your phone number first.';
-
+    
+    if (!isValidPhoneNumber(draft.phone)) {
+      return 'Enter a valid mobile number, for example 09171234567.';
+    }
+    if (!draft.isPhoneVerified) {
+      return 'Please verify your phone number first.';
+    }
+  
     return null;
   };
 
-
   const handleSignUp = async () => {
     const validationMessage = validate();
-
     if (validationMessage) {
       setFormError(validationMessage);
       return;
     }
 
     setFormError(null);
-    // await signUpWithEmail(name.trim(), email.trim(), password, normalizePhoneNumber(phone), );
-    // Assuming signUpWithEmail returns true on success (based on your useAuth code)
-    const success = await signUpWithEmail(name.trim(), email.trim(), password, normalizePhoneNumber(phone));
+    const success = await signUpWithEmail(
+      draft.name.trim(), 
+      draft.email.trim(), 
+      draft.password, 
+      normalizePhoneNumber(draft.phone)
+    );
     
     if (success) {
+      draft.reset();
       router.replace('/(tabs)/map');
     }
   };
 
+  // ✅ Updated with the Alert Prompt
   const handleGoogle = async () => {
     clearMessages();
-    const success = await signInWithGoogle();
-    if (success) {
+    const result = await signInWithGoogle();
+
+    if (result === 'LINK_PROMPT') {
+      Alert.alert(
+        "Account Exists",
+        "This email is already registered with a password. Do you want to log in instead?",
+        [
+          { text: "No", style: "cancel", onPress: async () => {
+              await signOutGoogle();
+            }},
+          { 
+            text: "Yes", 
+            onPress: async () => {
+              const success = await signInWithGoogle(true);
+              if (success) {
+                draft.reset();
+                router.replace('/(tabs)/map');
+              }
+            } 
+          }
+        ]
+      );
+    } else if (result === true) {
+      draft.reset();
       router.replace('/(tabs)/map');
     }
   };
 
   const canSubmit =
-    Boolean(name.trim()) && Boolean(email.trim()) && Boolean(password) && Boolean(confirmPassword) 
-     && Boolean(phone) && isPhoneVerified && !isLoading;
+    Boolean(draft.name.trim()) && Boolean(draft.email.trim()) && Boolean(draft.password) && 
+    Boolean(draft.confirmPassword) && Boolean(draft.phone) && draft.isPhoneVerified && !isLoading;
 
   return (
-    <KeyboardAvoidingView style={styles.screen}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-
-      <ScrollView
-        contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" 
-        showsVerticalScrollIndicator={false}>
+    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         
-        {/* Logo & Header */}
         <View style={styles.logoWrap}>
           <Image style={styles.logo} source={require('../../assets/icon.png')} resizeMode="contain" />
           <Text style={styles.subtitle}>Join the crew start riding with RIDO.</Text>
         </View>
 
-      <View style={styles.form}>
-        <AuthTextField
-          value={name}
-          onChangeText={(value) => {
-            setName(value);
-            clearMessages();
-          }}
-          placeholder="Full name"
-          leftIcon="user"
-          autoCapitalize="words"
-          autoComplete="name"
-          textContentType="name"
-          editable={!isLoading}
-        />
+        <View style={styles.form}>
+          <AuthTextField
+            value={draft.name}
+            onChangeText={(val) => { draft.setField('name', val); clearMessages(); }}
+            placeholder="Full name"
+            leftIcon="user"
+            autoCapitalize="words"
+            editable={!isLoading}
+          />
 
-        <AuthTextField
-          value={email}
-          onChangeText={(value) => {
-            setEmail(value);
-            clearMessages();
-          }}
-          placeholder="Email"
-          leftIcon='email'
-          keyboardType="email-address"
-          autoComplete="email"
-          textContentType="emailAddress"
-          editable={!isLoading}
-        />
+          <AuthTextField
+            value={draft.email}
+            onChangeText={(val) => { draft.setField('email', val); clearMessages(); }}
+            placeholder="Email"
+            leftIcon='email'
+            keyboardType="email-address"
+            autoCapitalize="none"
+            editable={!isLoading}
+          />
 
-        <AuthTextField
-          value={password}
-          onChangeText={(value) => {
-            setPassword(value);
-            clearMessages();
-          }}
-          placeholder={`Password (min ${MINIMUM_PASSWORD_LENGTH} characters)`}
-          leftIcon="lock"
-          isPassword
-          autoComplete="new-password"
-          textContentType="newPassword"
-          editable={!isLoading}
-        />
+          <AuthTextField
+            value={draft.password}
+            onChangeText={(val) => { draft.setField('password', val); clearMessages(); }}
+            placeholder={`Password (min ${MINIMUM_PASSWORD_LENGTH} characters)`}
+            leftIcon="lock"
+            isPassword
+            editable={!isLoading}
+          />
 
-        <AuthTextField
-          value={confirmPassword}
-          onChangeText={(value) => {
-            setConfirmPassword(value);
-            clearMessages();
-          }}
-          placeholder="Confirm password"
-          leftIcon="lock"
-          isPassword
-          autoComplete="new-password"
-          textContentType="newPassword"
-          editable={!isLoading}
-        />
+          <AuthTextField
+            value={draft.confirmPassword}
+            onChangeText={(val) => { draft.setField('confirmPassword', val); clearMessages(); }}
+            placeholder="Confirm password"
+            leftIcon="lock"
+            isPassword
+            editable={!isLoading}
+          />
 
-        <AuthTextField
-          value={phone}
-          onChangeText={handlePhoneChange}
-          placeholder="Mobile number (e.g. 09171234567)"
-          leftIcon='phone'
-          keyboardType="phone-pad"
-          textContentType="telephoneNumber"
-          editable={!isLoading && !isPhoneVerified}
-        />
-        
-          {/* Send Code Button */}
-          {!isPhoneVerified ? 
-          (
+          <AuthTextField
+            value={draft.phone}
+            onChangeText={handlePhoneChange}
+            placeholder="Mobile number (e.g. 09171234567)"
+            leftIcon='phone'
+            keyboardType="phone-pad"
+            editable={!isLoading && !draft.isPhoneVerified}
+          />
+          
+          {!draft.isPhoneVerified ? (
             <Text style={styles.verify}>
-              Verify your phone number first to continue. 
-              We’ll send you a verification code via SMS.{' '}
-        
-              <Text style={[styles.verifyLink, (!phone || isLoading) && { opacity: 0.5 }]}
+              Verify your phone number first to continue. We’ll send you a verification code via SMS.{' '}
+              <Text 
+                style={[styles.verifyLink, (!draft.phone || isLoading) && { opacity: 0.5 }]}
                 onPress={() => {
-                if (phone && !isLoading) 
-                  {
-                    router.push({pathname: '/(auth)/phone-verify',
-                      params: { phone: phone, flow: 'signup' }
+                  if (draft.phone && !isLoading) {
+                    router.push({
+                      pathname: '/(auth)/phone-verify',
+                      params: { phone: draft.phone, flow: 'signup' }
                     });
                   }
-                }}>Send Code</Text>{' '}
+                }}
+              >
+                Send Code
+              </Text>
             </Text>
           ) : (
-            <Text style={{ color: 'green', fontSize: 12, marginTop: 8, marginBottom: 16, textAlign: 'right', fontWeight: '600' }}>
-              ✓ Phone Verified
-            </Text>
+            <Text style={styles.verifyText}>✓ Phone Verified</Text>
           )}
 
-          {formError ? <Text style={styles.error}>{formError}</Text> : error}
-          
+          {formError && <Text style={styles.error}>{formError}</Text>}
+          {error && <Text style={styles.error}>{error}</Text>}
         </View>
 
-      <RoadButton
-        title="Create Account"
-        onPress={handleSignUp}
-        disabled={!canSubmit}
-        loading={isLoading}
-      />
+        <RoadButton title="Create Account" onPress={handleSignUp} disabled={!canSubmit} loading={isLoading} />
 
-         <View style={styles.dividerWrap}>
-          <AuthDivider label="or" />
-        </View>
+        <View style={styles.dividerWrap}><AuthDivider label="or" /></View>
         
         <View style={styles.googleWrap}>
           <GoogleSigninButton onPress={handleGoogle} loading={isLoading} />
         </View>
 
-        {/* Footer Link */}
         <View style={styles.footer}>
           <Text style={styles.footerText}>Already have an account? </Text>
           <TouchableOpacity onPress={() => router.replace('/(auth)/login')}>
             <Text style={styles.footerLink}>Sign In</Text>
           </TouchableOpacity>
         </View>
-       
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
-
 
 const styles = StyleSheet.create({
   screen: {
@@ -255,8 +246,6 @@ const styles = StyleSheet.create({
     paddingTop: 56,
     paddingBottom: 32,
   },
-
-  /* Header */
   logoWrap: {
     alignItems: 'center',
     marginBottom: 32,
@@ -265,8 +254,7 @@ const styles = StyleSheet.create({
     width: 193,
     height: 152,
   },
-
-   subtitle: {
+  subtitle: {
     fontSize: 13,
     color: Colors.black,
     textAlign: 'center',
@@ -277,49 +265,39 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     gap: 10,
   },
-
-  verify: 
-  {
+  verify: {
     marginBottom: 18,
   },
-  
-  verifyText:
-  {
+  verifyText: {
     fontSize: 13,
-    color: Colors.black,
+    color: Colors.darkGreen,
   },
-  verifyLink:
-  {
+  verifyLink: {
     color: '#4285F4',
     fontWeight: '600',
   },
-
   error: {
     color: Colors.errorRed,
     fontSize: 12,
     textAlign: 'center',
     marginBottom: 12,
   },
-
-    dividerWrap: {
+  dividerWrap: {
     width: '100%',
     maxWidth: 340,
     alignSelf: 'center',
   },
-
   googleWrap: {
     alignSelf: 'center',
     width: 327,
-    height:40.7,
+    height: 40.7,
     marginBottom: 1,
   },
-  
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
     marginTop: 8,
   },
-
   footerText: {
     fontSize: 13,
     color: Colors.black,
@@ -329,5 +307,4 @@ const styles = StyleSheet.create({
     color: '#4285F4', 
     fontWeight: '600',
   },
-
 });

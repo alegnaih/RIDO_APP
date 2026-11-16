@@ -2,19 +2,28 @@
 import React, { useState, useEffect } from 'react';
 import { Text, View, StyleSheet } from 'react-native';
 import { Colors } from '../../theme/colors';
+import { getTrustedTime } from '../../utils/time';
 
-export function CountdownTimer({ targetDate }: { targetDate: Date }) {
-  const [timeLeft, setTimeLeft] = useState(targetDate.getTime() - Date.now());
+interface CountdownTimerProps {
+  targetDate: Date;
+  status?: string; 
+}
+
+export function CountdownTimer({ targetDate, status }:  CountdownTimerProps) {
+  const [timeLeft, setTimeLeft] = useState(targetDate.getTime() - getTrustedTime());
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setTimeLeft(targetDate.getTime() - Date.now());
+      setTimeLeft(targetDate.getTime() - getTrustedTime());
     }, 1000);
     return () => clearInterval(interval);
   }, [targetDate]);
 
   if (timeLeft <= 0) {
-    return <Text style={styles.started}>Convoy Started!</Text>;
+     if (status ==='active') {
+      return <Text style={styles.statusText}>Convoy in Progress</Text>;
+    }
+    return <Text style={styles.statusText}>Convoy Trip Ended</Text>;
   }
 
   const hours = Math.floor(timeLeft / (1000 * 60 * 60));
@@ -38,5 +47,5 @@ const styles = StyleSheet.create({
   label: { fontSize: 18, fontWeight: '700', color: Colors.black },
   timerBox: { backgroundColor: Colors.greenBg, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 25 },
   timeText: { fontSize: 16, fontWeight: '600', color: Colors.greenBtn },
-  started: { fontSize: 18, fontWeight: '700', color: Colors.danger, marginBottom: 16 },
+  statusText: { fontSize: 18, fontWeight: '700', color: Colors.danger, marginBottom: 16 },
 });

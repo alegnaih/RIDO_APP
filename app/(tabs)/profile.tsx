@@ -1,7 +1,9 @@
-import React from 'react';
-import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity, } from 'react-native';
+// app/(tabs)/profile.tsx
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather, FontAwesome5 } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../../src/hooks/useAuth';
 import { Colors } from '../../src/theme/colors';
 
@@ -9,42 +11,111 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { user, signOut } = useAuth();
 
-  // Fallbacks in case the user data isn't fully loaded
   const userName = user?.name || 'RIDO User';
-  const userRole = user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : 'Member';
-  const convoyName = 'Sons of Luzon Pilipinas'; // Hardcoded for now, can be replaced with user data later
+  const displayId = user?.displayId || 'N/A';
+  const userPhone = user?.phone || '';
+
+  // ✅ Local state for images (Replace with Firebase Storage URLs later)
+  const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const [headerUri, setHeaderUri] = useState<string | null>(null);
+
+  // ✅ Image Picker Function
+  const pickImage = async (type: 'avatar' | 'header') => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: type === 'avatar' ? [1, 1] : [16, 9],
+      quality: 0.8,
+    });
+
+    if (!result.canceled) {
+      if (type === 'avatar') setAvatarUri(result.assets[0].uri);
+      if (type === 'header') setHeaderUri(result.assets[0].uri);
+    }
+  };
+
+  const handleAvatarPress = () => {
+    Alert.alert('Profile Picture', 'Choose an option', [
+      { text: 'Select New Picture', onPress: () => pickImage('avatar') },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const handleHeaderPress = () => {
+    Alert.alert('Header Picture', 'Choose an option', [
+      { text: 'Select New Picture', onPress: () => pickImage('header') },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
 
   return (
+    <View style={styles.screen}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         
         {/* ── Header & Avatar ── */}
         <View style={styles.headerContainer}>
-          <Image 
-            source={require('../../assets/bottom-bg.png')} 
-            style={styles.headerImage} 
-            resizeMode="cover" 
-          />
-          
-          <View style={styles.avatarWrapper}>
-            <View style={styles.avatarCircle}>
-              <FontAwesome5 name="user-alt" size={40} color={Colors.offWhite} />
+          {/* ✅ Clickable Header */}
+          <TouchableOpacity activeOpacity={0.9} onPress={handleHeaderPress} style={StyleSheet.absoluteFill}>
+            <Image 
+              source={headerUri ? { uri: headerUri } : require('../../assets/bottom-bg.png')} 
+              style={styles.headerImage} 
+              resizeMode="cover" 
+            />
+            <View style={styles.editBadge}>
+              <Feather name="camera" size={12} color="#FFF" />
             </View>
+          </TouchableOpacity>
+          
+          {/* ✅ Clickable Avatar */}
+          <View style={styles.avatarWrapper}>
+            <TouchableOpacity onPress={handleAvatarPress} style={styles.avatarCircle}>
+              {avatarUri ? (
+                <Image source={{ uri: avatarUri }} style={styles.avatarImage} />
+              ) : (
+                <FontAwesome5 name="user-alt" size={40} color={Colors.offWhite} />
+              )}
+            </TouchableOpacity>
           </View>
         </View>
 
         {/* ── User Info ── */}
         <View style={styles.userInfo}>
           <Text style={styles.userName}>{userName}</Text>
-          <View style={styles.roleContainer}>
-            <Text style={styles.userRole}>{userRole}</Text>
-            <View style={styles.dotSeparator} />
-            <Text style={styles.convoyName}>{convoyName}</Text>
+          <View style={styles.displayIdBadge}>
+            <Text style={styles.displayIdText}>ID: {displayId}</Text>
           </View>
         </View>
 
-        {/* ── Menu Items ── */}
         <View style={styles.menuContainer}>
-          
+          {/* ✅ Phone Verification Section */}
+          <View style={styles.phoneSection}>
+            <View style={styles.phoneHeader}>
+              <Feather name="phone" size={20} color={userPhone ? Colors.greenBtn : Colors.errorRed} />
+              <Text style={styles.phoneTitle}>Phone Number</Text>
+            </View>
+            
+            {userPhone ? (
+              <View style={styles.verifiedRow}>
+                <Text style={styles.phoneText}>{userPhone}</Text>
+                <View style={styles.verifiedBadge}>
+                  <Feather name="check-circle" size={12} color="#FFF" />
+                  <Text style={styles.verifiedText}>Verified</Text>
+                </View>
+              </View>
+            ) : (
+              <View>
+                <Text style={styles.phoneWarning}>No verified number linked. Required for offline SMS.</Text>
+                <TouchableOpacity 
+                  style={styles.verifyButton}
+                  onPress={() => router.push({ pathname: '/(auth)/phone-verify', params: { flow: 'profile' } })}
+                >
+                  <Text style={styles.verifyButtonText}>Verify Number Now</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+
+          {/* Menu Items */}
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/convoy')}>
             <View style={styles.menuLeft}>
               <FontAwesome5 name="motorcycle" size={20} color={Colors.darkGreen} style={styles.menuIcon} />
@@ -92,10 +163,9 @@ export default function ProfileScreen() {
               <Feather name="chevron-right" size={18} color={Colors.muted} />
             </TouchableOpacity>
           </View>
-
         </View>
-   
       </ScrollView>
+    </View>
   );
 }
 
@@ -105,10 +175,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.offWhite,
   },
   content: {
-    paddingBottom: 120, 
+    paddingBottom: 120,
   },
-  
-  /* Header */
   headerContainer: {
     width: '100%',
     height: 180,
@@ -116,27 +184,37 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   headerImage: {
-    ...StyleSheet.absoluteFillObject,
     width: '100%',
     height: '100%',
     opacity: 0.8,
   },
+  editBadge: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 6,
+    borderRadius: 20,
+  },
   avatarWrapper: {
-    marginBottom: -50, 
+    marginBottom: -50,
     zIndex: 10,
   },
   avatarCircle: {
     width: 100,
     height: 100,
     borderRadius: 50,
-    backgroundColor: '#5A6B8C', 
+    backgroundColor: '#5A6B8C',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 4,
     borderColor: Colors.offWhite,
+    overflow: 'hidden',
   },
-
-  /* User Info */
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+  },
   userInfo: {
     alignItems: 'center',
     marginTop: 60,
@@ -148,25 +226,77 @@ const styles = StyleSheet.create({
     color: Colors.black,
     marginBottom: 4,
   },
-  roleContainer: {
+  displayIdBadge: {
+    backgroundColor: Colors.greenBg,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  displayIdText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.greenBtn,
+    letterSpacing: 1,
+  },
+  
+  /* Phone Section Styles */
+  phoneSection: {
+    backgroundColor: Colors.white,
+    borderWidth: 1,
+    borderColor: Colors.lightGray,
+    borderRadius: 10,
+    padding: 16,
+    marginBottom: 20,
+  },
+  phoneHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 8,
   },
-  userRole: {
-    fontSize: 13,
+  phoneTitle: {
+    fontSize: 16,
+    fontWeight: '600',
     color: Colors.black,
-    fontWeight: '500',
+    marginLeft: 8,
   },
-  dotSeparator: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    backgroundColor: Colors.black,
-    marginHorizontal: 8,
+  verifiedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  convoyName: {
-    fontSize: 13,
+  phoneText: {
+    fontSize: 15,
     color: Colors.black,
+  },
+  verifiedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.greenBtn,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  verifiedText: {
+    color:  Colors.white,
+    fontSize: 10,
+    fontWeight: '700',
+    marginLeft: 4,
+  },
+  phoneWarning: {
+    fontSize: 13,
+    color: Colors.errorRed,
+    marginBottom: 12,
+  },
+  verifyButton: {
+    backgroundColor: Colors.greenBtn,
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  verifyButtonText: {
+    color: Colors.white,
+    fontWeight: '600',
+    fontSize: 14,
   },
 
   /* Menu Items */
@@ -198,8 +328,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: Colors.black,
   },
-
-  /* Support & Legal Group */
   supportGroup: {
     backgroundColor: Colors.white,
     borderWidth: 1,
@@ -233,24 +361,4 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Colors.black,
   },
-
- /* Logout */
-  logoutButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 24,
-    marginTop: 8,
-    padding: 16,
-    backgroundColor: Colors.lightRed, 
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: Colors.errorRed,
-  },
-  logoutText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: Colors.errorRed,
-  },
-
 });

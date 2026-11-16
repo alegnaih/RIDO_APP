@@ -7,6 +7,8 @@ import { FontAwesome5, Feather, MaterialCommunityIcons } from '@expo/vector-icon
 import { useTripDraftStore } from '../../store/useTripDraftStore';
 import { LocationPoint, Stopover } from '../../types/trips';
 import { Colors } from '../../theme/colors';
+import { useMapStore, MAP_STYLES } from '../../store/useMapStore'; 
+import { MapStyleSelector } from '../map/MapStyleSelector'; 
 
 interface WeatherPin {
   latitude: number;
@@ -28,12 +30,12 @@ interface Props {
   showWeatherButton?: boolean;
 }
 
-// ✅ Added the same helper from the Weather Along Route page
 const getWeatherIcon = (condition: string) => {
   switch (condition) {
     case 'Rain': return 'weather-pouring';
     case 'Clouds': return 'weather-cloudy';
     case 'Clear': return 'weather-sunny';
+
     default: return 'weather-partly-cloudy';
   }
 };
@@ -44,6 +46,8 @@ export function RoutePreviewMap({
   showWeatherButton = false
 }: Props) {
   const draft = useTripDraftStore();
+  const { styleIndex } = useMapStore(); 
+  const currentStyle = MAP_STYLES[styleIndex];
   const [showWeather, setShowWeather] = useState(false);
 
   const activeStart = startPoint !== undefined ? startPoint : draft.meetingPoint;
@@ -82,7 +86,7 @@ export function RoutePreviewMap({
     <View style={isFullScreen ? styles.fullScreenContainer : styles.container}>
       <MapboxGL.MapView 
         style={styles.map} 
-        styleURL={config.mapStyleUrl} 
+        styleURL={currentStyle.url} 
         logoEnabled={false} 
         scrollEnabled={isFullScreen} 
         zoomEnabled={isFullScreen}
@@ -125,9 +129,9 @@ export function RoutePreviewMap({
             key={`weather-${index}`} 
             id={`weather-${index}`} 
             coordinate={[pin.longitude, pin.latitude]}
-            anchor={{ x: 0.5, y: 1.1 }} // ✅ Shifts pin up slightly so it doesn't block the line
+            anchor={{ x: 0.5, y: 1.1 }} 
           >
-            {/* ✅ Clean Card Design */}
+            
             <View style={styles.weatherPin}>
               <MaterialCommunityIcons name={getWeatherIcon(pin.condition) as any} size={20} color={Colors.black} />
               <Text style={styles.pinTemp}>{pin.temp}°C</Text>
@@ -137,6 +141,8 @@ export function RoutePreviewMap({
         ))}
       </MapboxGL.MapView>
 
+        <MapStyleSelector 
+        style={isFullScreen ? { top: 50, right: 20 }: { top: 12, left: 12 }} />
       {isFullScreen ? (
         <>
           <TouchableOpacity style={[styles.actionBtn, { top: 50, left: 20 }]} onPress={onClose}>

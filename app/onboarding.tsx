@@ -106,7 +106,7 @@ export default function Onboarding() {
         ))}
       </View>
 
-      {/* Don't show again (only on last page) */}
+     
       {currentIndex === PAGES.length - 1 && (
         <TouchableOpacity
           style={styles.checkboxRow}
@@ -191,10 +191,10 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: 6,
     borderWidth: 2,
-    borderColor: Colors.border,
+    borderColor: Colors.darkGreen,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
+    marginRight: 5,
   },
   checkboxChecked: {
     backgroundColor: Colors.darkGreen,

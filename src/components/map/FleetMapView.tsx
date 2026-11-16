@@ -4,7 +4,8 @@ import MapboxGL from '@rnmapbox/maps';
 import * as Location from 'expo-location';
 import { config } from '../../constants/config';
 import { GeoPoint } from '../../types';
-
+import { useMapStore, MAP_STYLES } from '../../store/useMapStore';
+import {MapStyleSelector} from './MapStyleSelector';
 
 //export function FleetMapView({ centerCoordinate, style }: FleetMapViewProps) {
   export const FleetMapView = forwardRef(({ style, onUserLocationUpdate }: any, ref) => 
@@ -13,6 +14,9 @@ import { GeoPoint } from '../../types';
   const [initialCoords, setInitialCoords] = useState<[number, number]>([127.9842, 19.5999]);
   const mapRef = useRef<MapboxGL.MapView>(null);
   const cameraRef = useRef<MapboxGL.Camera>(null);
+  const { styleIndex } = useMapStore(); // ✅ Get current style
+  const currentStyle = MAP_STYLES[styleIndex];
+
   
     // Expose the setCamera function to the parent via ref
   useImperativeHandle(ref, () => ({
@@ -52,7 +56,7 @@ import { GeoPoint } from '../../types';
     <MapboxGL.MapView
       style={styles.map}
       ref={mapRef}
-     styleURL={config.mapStyleUrl}
+     styleURL={currentStyle.url}
     //  styleURL="mapbox://styles/mapbox/streets-v11" 
       logoEnabled={false}
       attributionEnabled={false}
@@ -85,7 +89,8 @@ import { GeoPoint } from '../../types';
         animationMode="flyTo"
         animationDuration={600}
       />
-    </MapboxGL.MapView>
+   </MapboxGL.MapView>
+      <MapStyleSelector style={{ bottom:220, right: 16 }} />
     </View>
   );
 });

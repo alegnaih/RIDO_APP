@@ -7,11 +7,7 @@ export interface RiderProfile {
   name: string;
   email: string;
   phone: string;
-  bloodType?: string;
-  emergencyContact?: {
-    name: string;
-    phone: string;
-  };
+  displayId?: string;
   role: UserRole;
   isOnline: boolean;
   lastSeen: number;

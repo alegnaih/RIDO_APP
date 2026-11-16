@@ -1,3 +1,4 @@
+import { getAuth } from '@react-native-firebase/auth';
 import { GestureHandlerRootView } from 'react-native-gesture-handler'; 
 import { useEffect } from 'react';
 import { Stack } from 'expo-router';
@@ -8,7 +9,8 @@ import MapboxGL from '@rnmapbox/maps';
 import { ThemeProvider } from '../src/contexts/ThemeContext';
 import { useAuth } from '../src/hooks/useAuth';
 import { config } from '../src/constants/config';
-
+import {syncServerTime } from '../src/utils/time';
+import {BottomSheetModalProvider} from '@gorhom/bottom-sheet';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -23,16 +25,20 @@ if (token)
   console.warn("MAPBOX TOKEN IS MISSING! Check your .env file.");
 }
 
+
 export default function RootLayout() {
   const { initialize } = useAuth();
+  useEffect(() => {
+    syncServerTime(); 
+  }, []);
 
-  // `initialize` returns the auth unsubscribe, so it doubles as the effect cleanup.
   useEffect(() => initialize(), [initialize]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaProvider>
       <ThemeProvider>
+        <BottomSheetModalProvider> 
         <StatusBar style="light" />
         <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
           <Stack.Screen name="onboarding" />
@@ -46,6 +52,7 @@ export default function RootLayout() {
             options={{presentation: 'fullScreenModal',animation: 'slide_from_bottom' }} 
           />
         </Stack>
+        </BottomSheetModalProvider>
       </ThemeProvider>
     </SafeAreaProvider>
     </GestureHandlerRootView>

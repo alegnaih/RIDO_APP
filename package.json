@@ -26,6 +26,7 @@
     "@rnmapbox/maps": "^10.3.7",
     "@turf/turf": "^7.4.0",
     "expo": "~54.0.36",
+    "expo-blur": "~15.0.8",
     "expo-camera": "~17.0.10",
     "expo-clipboard": "~8.0.8",
     "expo-constants": "~18.0.14",

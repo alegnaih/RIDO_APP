@@ -9,7 +9,7 @@ import { Feather, MaterialCommunityIcons, FontAwesome } from '@expo/vector-icons
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScrollView, FlatList } from 'react-native-gesture-handler'; 
 import * as turf from '@turf/turf'; 
-
+import { getTrustedTime } from '../../../src/utils/time'; 
 import { Trip } from '../../../src/types/trips';
 import { Colors } from '../../../src/theme/colors';
 import { config } from '../../../src/constants/config';
@@ -78,7 +78,7 @@ export default function WeatherDetailsScreen() {
 
     const fetchAllWeather = async () => {
       const startDate = trip.scheduledAt!.toDate();
-      const daysUntil = (startDate.getTime() - Date.now()) / (1000 * 3600 * 24);
+      const daysUntil = (startDate.getTime() - getTrustedTime()) / (1000 * 3600 * 24);
       
       if (daysUntil > 5) {
         setWeatherAvailable(false);

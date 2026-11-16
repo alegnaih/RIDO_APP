@@ -8,10 +8,11 @@ import { AuthLink } from '../../src/components/auth/AuthLink';
 import { RoadButton } from '../../src/components/ui/RoadButton';
 import { GoogleSigninButton } from '../../src/components/auth/GoogleSigninButton';
 import { Colors } from '../../src/theme/colors';
+import { signOutGoogle } from '../../src/api/auth';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { signInWithEmail, signInWithGoogle, error, clearError, isLoading } = useAuth();
+  const { signInWithEmail, signInWithGoogle, signOutGoogle, error, clearError, isLoading } = useAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -26,7 +27,6 @@ export default function LoginScreen() {
     clearMessages();
     const value = email.trim();
 
-    // ✅ 1. Validate FIRST
     if (!value.includes('@')) {
       setFormError('Enter a valid email address.');
       return;
@@ -36,10 +36,8 @@ export default function LoginScreen() {
       return;
     }
 
-    // ✅ 2. Call API ONCE
     const success = await signInWithEmail(value, password);
     
-    // ✅ 3. Redirect on success
     if (success) {
       router.replace('/(tabs)/map');
     }
@@ -47,12 +45,16 @@ export default function LoginScreen() {
 
   const handleGoogle = async () => {
     clearMessages();
+    const result = await signInWithGoogle();
+    //await signOutGoogle(); 
     
-    // ✅ 1. Call API ONCE
-    const success = await signInWithGoogle();
-    
-    // ✅ 2. Redirect on success
-    if (success) {
+    if (result === 'LINK_PROMPT') {
+
+      const success = await signInWithGoogle(true);
+      if (success) {
+        router.replace('/(tabs)/map');
+      }
+    } else if (result === true) {
       router.replace('/(tabs)/map');
     }
   };

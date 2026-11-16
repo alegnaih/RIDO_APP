@@ -1,5 +1,5 @@
-//app/trip/[id].tsx
-import React, { useEffect, useState } from 'react';
+//app/trip/[id]/index.tsx
+import React, { useEffect, useState, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, Modal, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getFirestore, doc, onSnapshot } from '@react-native-firebase/firestore';
@@ -15,9 +15,10 @@ import { useAuth } from '../../../src/hooks/useAuth';
 import { useTripDraftStore } from '../../../src/store/useTripDraftStore';
 import { RoutePreviewMap } from '../../../src/components/trip/RoutePreviewMap';
 import { CountdownTimer } from '../../../src/components/trip/CountDownTimer';
-import { updateTrip } from '../../../src/services/tripService';
+import { updateTrip, leaveTrip } from '../../../src/services/tripService';
 import { Colors } from '../../../src/theme/colors';
 import { config } from '../../../src/constants/config';
+import { getTrustedTime } from '../../../src/utils/time';
 
 // ✅ 1. Added Weather Icon Helper
 const getWeatherIcon = (condition: string) => {
@@ -42,6 +43,10 @@ export default function TripDetailsScreen() {
   const [trip, setTrip] = useState<Trip | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Modal state for leaving a trip
+  const [isLeaveModalVisible, setIsLeaveModalVisible] = useState(false);
+  const [isLeaving, setIsLeaving] = useState(false);
+  
   // UI Toggles
   const [isRouteVisible, setIsRouteVisible] = useState(true);
   const [isMembersVisible, setIsMembersVisible] = useState(true);
@@ -70,7 +75,37 @@ export default function TripDetailsScreen() {
 
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
 
+  const handleLeaveTrip = async () => {
+    if (!trip || !user?.uid) return;
+    setIsLeaving(true);
+    try {
+      await leaveTrip(trip.id, user.uid);
+      setIsLeaveModalVisible(false);
+      router.push({
+        pathname: '/trip-left',
+        params: { title: trip.title }
+      });
+    } catch (error) {
+      console.error("Failed to leave trip", error);
+      setIsLeaving(false);
+    }
+  };
+
   const isLeader = trip?.createdBy === user?.uid;
+
+  const isLocked = useMemo(() => {
+    if (!trip) return true;
+    if (trip.status === 'completed' || trip.status === 'cancelled') return true;
+    if (!trip.scheduledAt) return false;
+    
+    const scheduledTime = trip.scheduledAt.toDate().getTime();
+    const now = getTrustedTime(); 
+    const gracePeriodMs = 12 * 60 * 60 * 1000; 
+    
+    return now > (scheduledTime + gracePeriodMs);
+  }, [trip]);
+
+  const canEdit = isLeader && !isLocked;
 
   // 1. Fetch Trip Data
   useEffect(() => {
@@ -80,7 +115,6 @@ export default function TripDetailsScreen() {
         const data = docSnap.data() as Trip;
         setTrip({ ...data, id: docSnap.id });
         
-        // Initialize edit states
         setEditTitle(data.title || '');
         setEditDate(data.scheduledAt?.toDate() || null);
         setEditStartTime(data.startTime || '');
@@ -92,7 +126,8 @@ export default function TripDetailsScreen() {
     return () => unsubscribe();
   }, [id]);
 
-   useEffect(() => {
+  // 2. Fetch Member Names
+  useEffect(() => {
     const fetchMemberNames = async () => {
       if (!trip || !trip.members || trip.members.length === 0) return;
       
@@ -100,7 +135,6 @@ export default function TripDetailsScreen() {
       let hasChanges = false;
 
       for (const uid of trip.members) {
-        // If we don't have the name yet, fetch it from Firestore
         if (!newNames[uid]) {
           try {
             const profile = await fetchRiderProfile(uid);
@@ -108,7 +142,7 @@ export default function TripDetailsScreen() {
               newNames[uid] = profile.name;
               hasChanges = true;
             } else {
-              newNames[uid] = 'Rider'; // Fallback
+              newNames[uid] = 'Rider'; 
               hasChanges = true;
             }
           } catch (error) {
@@ -125,12 +159,12 @@ export default function TripDetailsScreen() {
     fetchMemberNames();
   }, [trip?.members]);
 
-  // 2. Fetch Weather
+  // 3. Fetch Weather
   useEffect(() => {
     if (!trip || !config.openWeatherApiKey || !trip.scheduledAt) return;
 
     const startDate = trip.scheduledAt.toDate() || new Date();
-    const daysUntilTrip = (startDate.getTime() - Date.now()) / (1000 * 3600 * 24);
+    const daysUntilTrip = (startDate.getTime() - getTrustedTime()) / (1000 * 3600 * 24);
     
     if (daysUntilTrip > 5) {
       setIsWeatherAvailable(false);
@@ -141,7 +175,6 @@ export default function TripDetailsScreen() {
     setWeatherPins([]);
     const tempRouteWeather: Record<string, any> = {};
 
-    // ✅ 2. Get actual durations from Firebase
     const durations = (trip as any).routeLegDurations || [];
 
     const fetchWeather = async (lat: number, lng: number, key: string, cumulativeDurationSec: number, isIntermediate = false) => {
@@ -151,7 +184,6 @@ export default function TripDetailsScreen() {
         
         if (!data.list || !data.list.length) return;
 
-        // ✅ 3. Accurate ETA Calculation based on cumulative durations
         const etaTime = new Date(startDate.getTime() + (cumulativeDurationSec * 1000));
         const etaString = etaTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
                 
@@ -179,13 +211,11 @@ export default function TripDetailsScreen() {
       }
     };
 
-    // 1. Fetch Start Location (0 seconds elapsed)
     let cumulativeSecs = 0;
     if (trip.meetingPoint) {
       fetchWeather(trip.meetingPoint.location.latitude, trip.meetingPoint.location.longitude, 'start', 0);
     }
 
-    // 2. Fetch Stopovers and Destination (Domino effect)
     trip.stopovers?.forEach((stop, i) => {
       cumulativeSecs += (durations[i] || 0); 
       fetchWeather(stop.location.latitude, stop.location.longitude, `stop-${i}`, cumulativeSecs);
@@ -196,20 +226,17 @@ export default function TripDetailsScreen() {
       fetchWeather(trip.endPoint.location.latitude, trip.endPoint.location.longitude, 'end', cumulativeSecs);
     }
 
-    // 3. Midpoint Logic (If >= 45km)
     const totalDistanceKm = parseFloat((trip as any).totalDistance?.replace('km', '') || '0');
     if (totalDistanceKm >= 45 && (trip as any).routeGeometry) {
       try {
         const parsedGeom = typeof (trip as any).routeGeometry === 'string' ? JSON.parse((trip as any).routeGeometry) : (trip as any).routeGeometry;
         const routeLength = turf.length(parsedGeom.geometry, { units: 'kilometers' });
         
-        // Calculate average speed (km per second) to estimate midpoint time
         const totalDurationSecs = durations.reduce((a: number, b: number) => a + b, 0);
         const avgSpeedKmPerSec = totalDurationSecs > 0 ? routeLength / totalDurationSecs : 0;
 
         for (let i = 20; i < routeLength; i += 20) {
           const point = turf.along(parsedGeom.geometry, i, { units: 'kilometers' });
-          // Estimate cumulative time for the midpoint based on distance covered
           const midpointDurationSecs = avgSpeedKmPerSec > 0 ? i / avgSpeedKmPerSec : 0;
           fetchWeather(point.geometry.coordinates[1], point.geometry.coordinates[0], `mid-${i}`, midpointDurationSecs, true);
         }
@@ -296,7 +323,7 @@ export default function TripDetailsScreen() {
           <View style={{ width: 24 }} />
         </View>
 
-        <CountdownTimer targetDate={startDate} />
+        <CountdownTimer targetDate={startDate} status={trip.status} />
 
         {/* Map Preview */}
         <RoutePreviewMap 
@@ -325,7 +352,8 @@ export default function TripDetailsScreen() {
               <Text style={styles.codeText}>#{trip.shareCode}</Text>
               <Feather name="copy" size={14} color={Colors.greenBtn} style={{ marginLeft: 6 }} />
             </TouchableOpacity>
-            {isLeader && (
+
+            {canEdit && (
               <TouchableOpacity onPress={() => isEditingDetails ? saveDetails() : setIsEditingDetails(true)}>
                 <Text style={styles.editText}>{isEditingDetails ? 'Save' : 'Edit'}</Text>
               </TouchableOpacity>
@@ -391,8 +419,8 @@ export default function TripDetailsScreen() {
         ) : (
           <TouchableOpacity 
             style={styles.descPlaceholder} 
-            onPress={() => isLeader && setIsEditingDesc(true)}
-            disabled={!isLeader}
+            onPress={() => canEdit && setIsEditingDesc(true)}
+            disabled={!canEdit}
           >
             <Text style={editDesc ? styles.descText : styles.descPlaceholderText}>
               {editDesc || 'No description provided.'}
@@ -406,7 +434,7 @@ export default function TripDetailsScreen() {
             <Feather name={isRouteVisible ? "chevron-up" : "chevron-down"} size={18} color={Colors.black} />
             <Text style={styles.sectionLabel}>ROUTE</Text>
           </TouchableOpacity>
-          {isLeader && (
+          {canEdit && (
             <TouchableOpacity onPress={handleEditRoute}>
               <Text style={styles.editText}>Edit</Text>
             </TouchableOpacity>
@@ -487,7 +515,7 @@ export default function TripDetailsScreen() {
             <Text style={styles.sectionLabel}>STRAY ALERT THRESHOLD</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
               <Text style={styles.sliderValue}>{editStray} meters</Text>
-              {isLeader && (
+              {canEdit && (
                 <TouchableOpacity onPress={() => isEditingStray ? saveStrayThreshold() : setIsEditingStray(true)}>
                   <Text style={styles.editText}>{isEditingStray ? 'Save' : 'Edit'}</Text>
                 </TouchableOpacity>
@@ -584,273 +612,280 @@ export default function TripDetailsScreen() {
 
       {/* Footer Buttons */}
       <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
+        
+        {/* LEFT BUTTON: Primary Action (Start Trip OR Leave Trip) */}
+        {isLeader ? (
+          canEdit ? (
+            <TouchableOpacity style={styles.startBtn} onPress={() => router.push(`/trip/${trip.id}/live`)}>
+              <Feather name="play" size={16} color={Colors.white} style={{ marginRight: 8 }} />
+              <Text style={styles.startText}>START TRIP NOW</Text>
+            </TouchableOpacity>
+          ) : null
+        ) : (
+          <TouchableOpacity style={styles.leaveBtn} onPress={() => setIsLeaveModalVisible(true)}>
+            <Text style={styles.leaveText}>Leave Trip</Text>
+          </TouchableOpacity>
+        )}
+        
+        {/* RIGHT BUTTON: Return Home (Always visible) */}
         <TouchableOpacity style={styles.returnBtn} onPress={() => router.replace('/(tabs)/my-trips')}>
           <Text style={styles.returnText}>Return Home</Text>
         </TouchableOpacity>
-        
-        {isLeader && (
-          <TouchableOpacity style={styles.startBtn} onPress={() => router.push(`/trip/${trip.id}/live`)}>
-            <Feather name="play" size={16} color={Colors.white} style={{ marginRight: 8 }} />
-            <Text style={styles.startText}>START TRIP NOW</Text>
-          </TouchableOpacity>
-        )}
       </View>
+
+      {/* Leave Trip Confirmation Modal */}
+      <Modal visible={isLeaveModalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Feather name="log-out" size={40} color={Colors.darkGreen} style={{ marginBottom: 16 }} />
+            
+            <Text style={styles.modalTitle}>Are you sure you want to leave this trip?</Text>
+            <Text style={styles.modalSubtitle}>You can rejoin with the trip code.</Text>
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity 
+                style={styles.modalCancelBtn} 
+                onPress={() => setIsLeaveModalVisible(false)}
+                disabled={isLeaving}
+              >
+                <Text style={styles.modalCancelText}>No</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.modalConfirmBtn} 
+                onPress={handleLeaveTrip}
+                disabled={isLeaving}
+              >
+                {isLeaving ? (
+                  <ActivityIndicator color="#FFF" size="small" />
+                ) : (
+                  <Text style={styles.modalConfirmText}>Yes</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: 
-  { 
-    flex: 1, 
-    backgroundColor: Colors.offWhite 
+  container: {
+    flex: 1,
+    backgroundColor: Colors.offWhite
   },
-  center: 
-  { 
-    flex: 1, 
-    justifyContent: 'center', 
-    alignItems: 'center' 
+  center: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center'
   },
-  content: 
-  { 
-    padding: 20, 
-    paddingBottom: 120 
+  content: {
+    padding: 20,
+    paddingBottom: 120
   },
-  header: 
-  { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    marginBottom: 20 
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20
   },
-  headerTitle: 
-  { 
-    fontSize: 16, 
-    fontWeight: '600', 
-    color: Colors.muted 
+  headerTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.muted
   },
-  titleRow: 
-  { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'space-between', 
-    marginTop: 20 
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 20
   },
-  title: 
-  { 
-    fontSize: 24, 
-    fontWeight: '700', 
-    color: Colors.black 
+  title: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: Colors.black
   },
-  codeBadge: 
-  { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    backgroundColor: Colors.greenBg, 
+  codeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.greenBg,
     paddingHorizontal: 12,
-    paddingVertical: 6, 
-    borderRadius: 20 
+    paddingVertical: 6,
+    borderRadius: 20
   },
-  codeText: 
-  { 
-    fontSize: 14, 
-    fontWeight: '700', 
-    color: Colors.greenBtn 
+  codeText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.greenBtn
   },
-  subText: 
-  { 
-    fontSize: 13, 
-    color: Colors.muted, 
-    marginTop: 8 
+  subText: {
+    fontSize: 13,
+    color: Colors.muted,
+    marginTop: 8
   },
-  sectionLabel: 
-  { 
-    fontSize: 12, 
-    fontWeight: '700', 
-    color: Colors.muted, 
-    letterSpacing: 1 
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.muted,
+    letterSpacing: 1
   },
-  descBox: 
-  { 
-    borderWidth: 1, 
-    borderColor: Colors.muted, 
-    borderRadius: 12, 
-    padding: 14, 
-    minHeight: 60, 
-    marginTop: 8 
+  descBox: {
+    borderWidth: 1,
+    borderColor: Colors.muted,
+    borderRadius: 12,
+    padding: 14,
+    minHeight: 60,
+    marginTop: 8
   },
-  descText: 
-  { 
-    color: Colors.black, 
-    fontSize: 14 
+  descText: {
+    color: Colors.black,
+    fontSize: 14
   },
-  descPlaceholder: 
-  { 
-    borderWidth: 1, 
-    borderColor: Colors.muted, 
-    borderRadius: 10, 
-    padding: 14, 
-    minHeight: 60 
+  descPlaceholder: {
+    borderWidth: 1,
+    borderColor: Colors.muted,
+    borderRadius: 10,
+    padding: 14,
+    minHeight: 60
   },
-  descPlaceholderText: 
-  { 
-    color: Colors.muted, 
-    fontStyle: 'italic', 
-    fontSize: 14 
+  descPlaceholderText: {
+    color: Colors.muted,
+    fontStyle: 'italic',
+    fontSize: 14
   },
-  descInput: 
-  { 
-    borderWidth: 1, 
-    borderColor: Colors.greenBtn, 
-    borderRadius: 10, 
-    padding: 14, 
-    minHeight: 80, 
-    textAlignVertical: 'top', 
-    backgroundColor: Colors.offWhite 
+  descInput: {
+    borderWidth: 1,
+    borderColor: Colors.greenBtn,
+    borderRadius: 10,
+    padding: 14,
+    minHeight: 80,
+    textAlignVertical: 'top',
+    backgroundColor: Colors.offWhite
   },
-  doneBtn: 
-  { 
-    alignSelf: 'flex-end', 
-    marginTop: 8 
+  doneBtn: {
+    alignSelf: 'flex-end',
+    marginTop: 8
   },
-  doneBtnText: 
-  { 
-    color: Colors.greenBtn, 
-    fontWeight: '600' 
+  doneBtnText: {
+    color: Colors.greenBtn,
+    fontWeight: '600'
   },
-  detailsHeader: 
-  { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    marginTop: 20 
+  detailsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 20
   },
-  editText: 
-  { 
-    color: Colors.greenBtn, 
-    fontSize: 14, 
-    fontWeight: '600' 
+  editText: {
+    color: Colors.greenBtn,
+    fontSize: 14,
+    fontWeight: '600'
   },
-  dateBtn: 
-  { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    gap: 6, 
-    backgroundColor: Colors.backgroundOverlay, 
-    padding: 8, 
-    borderRadius: 8 
+  dateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: Colors.backgroundOverlay,
+    padding: 8,
+    borderRadius: 8
   },
-  dateBtnText: 
-  { 
-    fontSize: 13, 
-    color: Colors.black , 
+  dateBtnText: {
+    fontSize: 13,
+    color: Colors.black
   },
-  routeHeader: 
-  { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    marginTop: 24, 
-    marginBottom: 10 
+  routeHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 24,
+    marginBottom: 10
   },
-  routeTitleContainer: 
-  { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    gap: 6 
+  routeTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6
   },
-  routeList: 
-  { 
-    backgroundColor: Colors.backgroundOverlay, 
-    borderRadius: 15, 
-    padding: 16 
+  routeList: {
+    backgroundColor: Colors.backgroundOverlay,
+    borderRadius: 15,
+    padding: 16
   },
-  routeItem: 
-  { 
-    flexDirection: 'row', 
-    alignItems: 'flex-start', 
-    marginBottom: 16 
+  routeItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 16
   },
-  dot: 
-  { 
-    width: 10, 
-    height: 10, 
-    borderRadius: 5, 
-    marginTop: 4, 
-    marginRight: 12 
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginTop: 4,
+    marginRight: 12
   },
-  locName: 
-  { 
-    fontSize: 14, 
-    fontWeight: '600', 
-    color: Colors.black 
+  locName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.black
   },
   locAddress: {
     fontSize: 11,
     color: Colors.muted,
-    marginTop: 2,
+    marginTop: 2
   },
-  distanceText: 
-  { 
-    fontSize: 12, 
-    color: Colors.muted, 
-    fontWeight: '500', 
+  distanceText: {
+    fontSize: 12,
+    color: Colors.muted,
+    fontWeight: '500'
   },
-  weatherText: 
-  { 
-    fontSize: 12, 
-    color: Colors.muted, 
+  weatherText: {
+    fontSize: 12,
+    color: Colors.muted
   },
   rightInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: 8,
+    marginLeft: 8
   },
   bullet: {
     fontSize: 12,
     color: Colors.muted,
-    marginHorizontal: 4,
+    marginHorizontal: 4
   },
-  weatherWarning: 
-  { 
-    fontSize: 12, 
-    color: Colors.muted, 
-    fontStyle: 'italic', 
-    marginBottom: 12, 
-    textAlign: 'center' 
+  weatherWarning: {
+    fontSize: 12,
+    color: Colors.muted,
+    fontStyle: 'italic',
+    marginBottom: 12,
+    textAlign: 'center'
   },
-  sliderSection: 
-  { 
-    marginTop: 24, 
-    marginBottom: 8 
+  sliderSection: {
+    marginTop: 24,
+    marginBottom: 8
   },
-  sliderContainer: 
-  { 
-    marginTop: 8, 
-    backgroundColor: Colors.backgroundOverlay, 
-    borderRadius: 15, 
-    maxHeight: 50,              
-    justifyContent: 'center', 
-    paddingHorizontal: 10,    
-    overflow: 'hidden',
+  sliderContainer: {
+    marginTop: 8,
+    backgroundColor: Colors.backgroundOverlay,
+    borderRadius: 15,
+    maxHeight: 50,
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    overflow: 'hidden'
   },
-  
-
   sliderLabels: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: 4,
+    paddingHorizontal: 4
   },
   sliderLabelText: {
     fontSize: 11,
     color: Colors.muted,
-    fontWeight: '500',
+    fontWeight: '500'
   },
-
   solidTrackWrapper: {
     height: 20,
     justifyContent: 'center',
-    position: 'relative',
+    position: 'relative'
   },
   solidTrackBg: {
     position: 'absolute',
@@ -858,14 +893,14 @@ const styles = StyleSheet.create({
     right: 0,
     height: 4,
     backgroundColor: Colors.backgroundOverlay,
-    borderRadius: 2,
+    borderRadius: 2
   },
   solidTrackFill: {
     position: 'absolute',
     left: 0,
     height: 2,
     backgroundColor: Colors.greenBtn,
-    borderRadius: 2,
+    borderRadius: 2
   },
   solidTrackThumb: {
     position: 'absolute',
@@ -873,127 +908,168 @@ const styles = StyleSheet.create({
     height: 10,
     borderRadius: 8,
     backgroundColor: Colors.greenBtn,
-    marginLeft: -8, 
-    top: 5,
+    marginLeft: -8,
+    top: 5
   },
-  
-  sliderHeader: 
-  { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center' 
+  sliderHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center'
   },
-  sliderValue: 
-  { 
-    fontSize: 14, 
-    fontWeight: '700', 
-    color:  Colors.greenBtn,
+  sliderValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.greenBtn,
     backgroundColor: Colors.greenBg,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12
   },
-  sliderHint: 
-  { 
-    fontSize: 12, 
-    color: Colors.muted, 
-    fontStyle: 'italic', 
-    marginTop: 8 
+  sliderHint: {
+    fontSize: 12,
+    color: Colors.muted,
+    fontStyle: 'italic',
+    marginTop: 8
   },
-  membersHeader: 
-  { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    marginTop: 24, 
-    marginBottom: 10 
+  membersHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 24,
+    marginBottom: 10
   },
-  membersBox: 
-  { 
-    backgroundColor: Colors.backgroundOverlay, 
-    borderRadius: 15, 
-    padding: 16 
+  membersBox: {
+    backgroundColor: Colors.backgroundOverlay,
+    borderRadius: 15,
+    padding: 16
   },
-  memberItem: 
-  { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    marginBottom: 8 
+  memberItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8
   },
-  memberName: 
-  { 
-    fontSize: 14, 
-    color: Colors.black, 
+  memberName: {
+    fontSize: 14,
+    color: Colors.black,
     marginLeft: 8,
-    fontWeight: '500' 
+    fontWeight: '500'
   },
-  leaderBadge: 
-  { 
-    backgroundColor: Colors.greenBg, 
-    color: Colors.darkGreen, 
-    fontSize: 10, 
-    paddingHorizontal: 8, 
+  leaderBadge: {
+    backgroundColor: Colors.greenBg,
+    color: Colors.darkGreen,
+    fontSize: 10,
+    paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 12, 
-    overflow: 'hidden' 
+    borderRadius: 12,
+    overflow: 'hidden'
   },
-  saveBtn: 
-  { 
-    backgroundColor:  Colors.greenBtn, 
-    borderRadius: 14, 
-    paddingVertical: 16, 
-    alignItems: 'center', 
-    marginTop: 24 
+  footer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    backgroundColor: Colors.offWhite,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border
   },
-  saveBtnText: 
-  { 
-    color: Colors.offWhite, 
-    fontSize: 16, 
-    fontWeight: '700' 
+  leaveBtn: {
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: Colors.errorRed,
+    backgroundColor: Colors.offWhite
   },
-  footer: 
-  { 
-    position: 'absolute', 
-    bottom: 0, 
-    left: 0, 
-    right: 0, 
-    flexDirection: 'row', 
-    justifyContent: 'center', 
-    gap: 12, 
-    paddingHorizontal: 20, 
-    paddingTop: 16, 
-    backgroundColor: Colors.offWhite, 
-    borderTopWidth: 1, 
-    borderTopColor: Colors.border 
+  leaveText: {
+    color: Colors.errorRed,
+    fontWeight: '600',
+    fontSize: 15
   },
-  returnBtn: 
-  { 
-    paddingVertical: 14, 
-    paddingHorizontal: 24, 
-    borderRadius: 24, 
-    borderWidth: 1, 
-    borderColor: Colors.black, 
-    backgroundColor: Colors.offWhite 
+  returnBtn: {
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: Colors.black,
+    backgroundColor: Colors.offWhite
   },
-  returnText: 
-  { 
-    color: Colors.black, 
-    fontWeight: '600', 
-    fontSize: 15 
+  returnText: {
+    color: Colors.black,
+    fontWeight: '600',
+    fontSize: 15
   },
-  startBtn: 
-  { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    paddingVertical: 14, 
-    paddingHorizontal: 24, 
-    borderRadius: 24, 
+  startBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 24,
     backgroundColor: Colors.greenBtn
   },
-  startText: 
-  { 
-    color: Colors.offWhite, 
-    fontWeight: '700', 
-    fontSize: 15 
+  startText: {
+    color: Colors.offWhite,
+    fontWeight: '700',
+    fontSize: 15
   },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  modalContent: {
+    width: '85%',
+    backgroundColor: Colors.offWhite,
+    borderRadius: 24,
+    padding: 24,
+    alignItems: 'center'
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.black,
+    textAlign: 'center',
+    marginBottom: 8
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: Colors.muted,
+    textAlign: 'center',
+    marginBottom: 24
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    width: '100%',
+    gap: 12
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: Colors.muted,
+    alignItems: 'center'
+  },
+  modalCancelText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.black
+  },
+  modalConfirmBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 20,
+    backgroundColor: Colors.greenBtn,
+    alignItems: 'center'
+  },
+  modalConfirmText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFF'
+  }
 });

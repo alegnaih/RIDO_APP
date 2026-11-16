@@ -1,3 +1,4 @@
+// app/(auth)/phone-verify.tsx
 import React, { useEffect, useState, useRef } from 'react';
 import { StyleSheet, View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { useRouter,useLocalSearchParams } from 'expo-router';
@@ -43,14 +44,6 @@ export default function PhoneVerifyScreen() {
     }
   }, [paramPhone]);
 
-
- /* useEffect(() => {
-    // Only redirect if params are loaded, authenticated, and NOT in signup flow
-    if (isParamsReady && isAuthenticated && flow !== 'signup') {
-      router.replace('/(tabs)/map');
-    }
-  }, [isParamsReady, isAuthenticated, flow, router]); */
-
   useEffect(() => {
     // Params are loaded on mount. We just set ready to true.
     setIsParamsReady(true);
@@ -93,8 +86,8 @@ export default function PhoneVerifyScreen() {
     }
 
     setFormError(null);
-
-    const success = await confirmPhoneCode(verificationId, code);
+    const isSignup = flow === 'signup';
+    const success = await confirmPhoneCode(verificationId, code, isSignup);
 
      if (success) {
       if (flow === 'signup') {
@@ -151,7 +144,8 @@ export default function PhoneVerifyScreen() {
           </View>
         )}
 
-        {(formError ?? error) && <Text style={styles.error}>{formError ?? error}</Text>}
+        {/* ✅ FIXED: Added !! and String() to prevent raw strings from being rendered */}
+        {!!(formError ?? error) && <Text style={styles.error}>{String(formError ?? error)}</Text>}
 
         {/* Resend Code / Timer */}
         {isCodeStep && (

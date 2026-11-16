@@ -59,18 +59,19 @@ function getErrorCode(error: unknown): string | null {
  * Maps a Firebase auth failure to a message a rider can act on.
  * Falls back to the raw message, then to the supplied default.
  */
-export function getAuthErrorMessage(error: unknown, fallback: string): string {
-  const code = getErrorCode(error);
-  if (code && code in AUTH_ERROR_MESSAGES) {
-    return AUTH_ERROR_MESSAGES[code];
-  }
+export function getAuthErrorMessage(error: any, fallback: string): string {
+  if (!error || !error.code) return fallback;
 
-  const raw = getErrorMessage(error, fallback);
-  // Firebase wraps many failures as "Firebase: Error (auth/xyz)." — strip the noise.
-  const embedded = raw.match(/\(([^)]+)\)\.?$/);
-  if (embedded && embedded[1] in AUTH_ERROR_MESSAGES) {
-    return AUTH_ERROR_MESSAGES[embedded[1]];
+  switch (error.code) {
+    case 'auth/email-already-in-use':
+      return 'This email is already registered. Please log in instead.';
+    case 'auth/invalid-email':
+      return 'That email address is invalid.';
+    case 'auth/weak-password':
+      return 'Your password is too weak.';
+    case 'auth/phone-number-already-exists':
+      return 'This phone number is already linked to another account.';
+    default:
+      return fallback;
   }
-
-  return raw;
 }

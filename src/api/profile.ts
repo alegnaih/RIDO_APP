@@ -1,3 +1,4 @@
+// src/api/profile.ts
 import { doc, getDoc, setDoc } from '@react-native-firebase/firestore';
 import { getFirebaseFirestore } from './firebase';
 import { RiderProfile, UserRole } from '../types';
@@ -12,14 +13,14 @@ interface StoredRiderProfile {
   name?: unknown;
   email?: unknown;
   phone?: unknown;
-  bloodType?: unknown;
+  displayId?: unknown; // ✅ ADDED THIS LINE
   role?: unknown;
   emergencyContact?: unknown;
 }
 
 /** The subset of a profile a rider can change. Written with `merge` so it never clobbers other fields. */
 export type RiderProfileUpdate = Partial<
-  Pick<RiderProfile, 'name' | 'email' | 'phone' | 'bloodType' | 'emergencyContact' | 'role'>
+  Pick<RiderProfile, 'name' | 'email' | 'phone' | 'displayId' | 'role'>
 >;
 
 function asString(value: unknown): string {
@@ -28,19 +29,6 @@ function asString(value: unknown): string {
 
 function asRole(value: unknown): UserRole {
   return value === 'leader' || value === 'sweeper' || value === 'member' ? value : 'member';
-}
-
-function asEmergencyContact(value: unknown): RiderProfile['emergencyContact'] {
-  if (typeof value !== 'object' || value === null) {
-    return undefined;
-  }
-
-  const candidate = value as { name?: unknown; phone?: unknown };
-  if (typeof candidate.name !== 'string' || typeof candidate.phone !== 'string') {
-    return undefined;
-  }
-
-  return { name: candidate.name, phone: candidate.phone };
 }
 
 /** Reads the rider's profile document, or `null` if they have never completed registration. */
@@ -58,8 +46,7 @@ export async function fetchRiderProfile(uid: string): Promise<RiderProfile | nul
     name: asString(stored.name),
     email: asString(stored.email),
     phone: asString(stored.phone),
-    bloodType: asString(stored.bloodType) || undefined,
-    emergencyContact: asEmergencyContact(stored.emergencyContact),
+    displayId: asString(stored.displayId), // ✅ Now TypeScript knows this exists
     role: asRole(stored.role),
     isOnline: true,
     lastSeen: Date.now(),

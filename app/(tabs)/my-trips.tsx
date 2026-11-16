@@ -1,14 +1,16 @@
 // app/(tabs)/my-trips.tsx
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, SectionList } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, SectionList, Modal } from 'react-native';
 import { useRouter } from 'expo-router';
 import { getFirestore, collection, query, where, onSnapshot } from '@react-native-firebase/firestore';
-import { Feather } from '@expo/vector-icons';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../src/hooks/useAuth';
 import { Trip } from '../../src/types/trips';
 import { Colors } from '../../src/theme/colors';
+import { getTrustedTime, isTimeSynced } from '../../src/utils/time';
+import { deleteTrip } from '../../src/services/tripService';
 
 interface TripSection {
   title: string;
@@ -22,13 +24,25 @@ export default function MyTripsScreen() {
 
   const [sections, setSections] = useState<TripSection[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isSyncReady, setIsSyncReady] = useState(isTimeSynced());
+
+  const [tripToDelete, setTripToDelete] = useState<Trip | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
-    if (!user?.uid) {
-      setSections([]);
-      setLoading(false);
-      return;
-    }
+    if (isSyncReady) return;
+    const interval = setInterval(() => {
+      if (isTimeSynced()) {
+        setIsSyncReady(true);
+        clearInterval(interval);
+      }
+    }, 500);
+    return () => clearInterval(interval);
+  }, [isSyncReady]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    if (!isSyncReady) return; 
 
     const db = getFirestore();
     const q = query(collection(db, 'trips'), where('members', 'array-contains', user.uid));
@@ -37,7 +51,7 @@ export default function MyTripsScreen() {
       const ongoing: Trip[] = [];
       const upcoming: Trip[] = [];
       const completed: Trip[] = [];
-      const now = new Date().getTime();
+      const now = getTrustedTime();
 
       snapshot.forEach((doc) => {
         const trip = { id: doc.id, ...doc.data() } as Trip;
@@ -47,23 +61,16 @@ export default function MyTripsScreen() {
           ongoing.push(trip);
         } else if (trip.status === 'completed' || trip.status === 'cancelled') {
           completed.push(trip);
-        } else if (trip.status === 'planned') {
-          // If it's planned but the date has passed, you can choose to put it in completed or upcoming.
-          // We'll keep it in upcoming for now unless the user explicitly ended it.
-          upcoming.push(trip);
+        } else if (trip.status === 'planned' || !trip.status) {
+          if (tripDate < now) completed.push(trip);
+          else upcoming.push(trip);
         }
       });
 
-      // ✅ Sort Ongoing: Just by date
       ongoing.sort((a, b) => (a.scheduledAt?.toDate()?.getTime() || 0) - (b.scheduledAt?.toDate()?.getTime() || 0));
-
-      // ✅ Sort Upcoming: Closest date first (Ascending)
       upcoming.sort((a, b) => (a.scheduledAt?.toDate()?.getTime() || 0) - (b.scheduledAt?.toDate()?.getTime() || 0));
-
-      // ✅ Sort Completed: Most recent first (Descending)
       completed.sort((a, b) => (b.scheduledAt?.toDate()?.getTime() || 0) - (a.scheduledAt?.toDate()?.getTime() || 0));
 
-      // Build sections, only adding them if they have data
       const newSections: TripSection[] = [];
       if (ongoing.length > 0) newSections.push({ title: 'Ongoing', data: ongoing });
       if (upcoming.length > 0) newSections.push({ title: 'Upcoming', data: upcoming });
@@ -77,13 +84,29 @@ export default function MyTripsScreen() {
     });
 
     return () => unsubscribe();
-  }, [user?.uid]);
+  }, [user?.uid, isSyncReady]);
+
+  const handleDeleteConfirm = async () => {
+    if (!tripToDelete) return;
+    setIsDeleting(true);
+    try {
+      await deleteTrip(tripToDelete.id);
+      setTripToDelete(null);
+      router.push({
+        pathname: '/trip-deleted',
+        params: { title: tripToDelete.title }
+      });
+    } catch (error) {
+      console.error("Failed to delete trip", error);
+      setIsDeleting(false);
+    }
+  };
 
   const handleCreateTrip = () => {
     router.push('/create-trip');
   };
 
-  if (loading) {
+  if (loading || !isSyncReady) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color={Colors.darkGreen} />
@@ -95,14 +118,12 @@ export default function MyTripsScreen() {
 
   return (
     <View style={styles.container}>
-      {/* ✅ Use SectionList instead of ScrollView */}
       <SectionList
         sections={sections}
         keyExtractor={(item) => item.id}
         contentContainerStyle={[styles.content, { paddingTop: insets.top + 20 }]}
         stickySectionHeadersEnabled={false}
         
-        // Header (Title + Add Button)
         ListHeaderComponent={
           <View style={styles.header}>
             <Text style={styles.headerTitle}>My Trips</Text>
@@ -112,7 +133,6 @@ export default function MyTripsScreen() {
           </View>
         }
 
-        // Empty State
         ListEmptyComponent={
           isEmpty ? (
             <View style={styles.emptyState}>
@@ -126,16 +146,16 @@ export default function MyTripsScreen() {
           ) : null
         }
 
-        // Section Header (e.g., "ONGOING", "UPCOMING", "COMPLETED")
         renderSectionHeader={({ section: { title } }) => (
           <Text style={styles.sectionHeader}>{title}</Text>
         )}
 
-        // Individual Trip Card
         renderItem={({ item: trip }) => {
           const startDate = trip.scheduledAt?.toDate() || new Date();
           const dateStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
           const isLeader = trip.createdBy === user?.uid;
+          
+          const canDelete = isLeader && trip.status === 'planned' && startDate.getTime() > getTrustedTime();
 
           return (
             <TouchableOpacity 
@@ -157,24 +177,72 @@ export default function MyTripsScreen() {
               </View>
               
               <View style={styles.cardFooter}>
-                <View style={styles.roleBadge}>
+                 <View style={[styles.roleBadge, isLeader && styles.roleBadgeLeader]}>
                   <Text style={styles.roleText}>{isLeader ? 'LEADER' : 'MEMBER'}</Text>
+              </View>
+
+                <View style={styles.rightActions}>
+                  {trip.status === 'active' && (
+                    <View style={styles.activeBadge}>
+                      <View style={styles.activeDot} />
+                      <Text style={styles.activeText}>Active</Text>
+                    </View>
+                  )}
+                  
+                  {canDelete && (
+                    <TouchableOpacity 
+                      style={styles.deleteBtn}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        setTripToDelete(trip);
+                      }}
+                    >
+                      <Feather name="trash-2" size={18} color={Colors.errorRed} />
+                    </TouchableOpacity>
+                  )}
+
+                  <Feather name="chevron-right" size={20} color="#999" />
                 </View>
-                
-                {/* Show a status indicator if it's ongoing */}
-                {trip.status === 'active' && (
-                  <View style={styles.activeBadge}>
-                    <View style={styles.activeDot} />
-                    <Text style={styles.activeText}>Active</Text>
-                  </View>
-                )}
-                
-                <Feather name="chevron-right" size={20} color="#999" />
               </View>
             </TouchableOpacity>
           );
         }}
       />
+
+      <Modal visible={!!tripToDelete} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <MaterialCommunityIcons name="delete-outline" size={40} color={Colors.darkGreen} style={{ marginBottom: 12 }} />
+            
+            <Text style={styles.modalTitle}>Are you sure you want to leave this trip?</Text>
+            <Text style={styles.modalSubtitle}>
+              You cannot recover this, and all members will be notified that you have cancelled this trip.
+            </Text>
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity 
+                style={styles.modalCancelBtn} 
+                onPress={() => setTripToDelete(null)}
+                disabled={isDeleting}
+              >
+                <Text style={styles.modalCancelText}>No</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.modalDeleteBtn} 
+                onPress={handleDeleteConfirm}
+                disabled={isDeleting}
+              >
+                {isDeleting ? (
+                  <ActivityIndicator color="#FFF" size="small" />
+                ) : (
+                  <Text style={styles.modalDeleteText}>Delete</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -192,7 +260,7 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 20,
-    paddingBottom: 120, 
+    paddingBottom: 120,
   },
   header: {
     flexDirection: 'row',
@@ -213,8 +281,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  
-  /* Section Headers */
   sectionHeader: {
     fontSize: 14,
     fontWeight: '700',
@@ -224,8 +290,6 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginBottom: 12,
   },
-
-  /* Empty State */
   emptyState: {
     alignItems: 'center',
     marginTop: 60,
@@ -256,8 +320,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 16,
   },
-
-  /* Trip Card */
   tripCard: {
     backgroundColor: Colors.white,
     borderRadius: 16,
@@ -266,7 +328,10 @@ const styles = StyleSheet.create({
     borderColor: '#EAEAEA',
     elevation: 2,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
     shadowOpacity: 0.05,
     shadowRadius: 4,
     marginBottom: 12,
@@ -309,18 +374,22 @@ const styles = StyleSheet.create({
     paddingTop: 12,
   },
   roleBadge: {
-    backgroundColor: '#A5C3B5',
+    backgroundColor: Colors.lightGreen,
+    color:Colors.black,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
   },
+
+   roleBadgeLeader: {
+    backgroundColor: Colors.greenBtn, // Darker green for leaders
+  },
+  
   roleText: {
     fontSize: 10,
     fontWeight: '700',
     color: '#FFF',
   },
-  
-  /* Active Status Badge */
   activeBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -328,7 +397,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
-    marginLeft: 'auto',
     marginRight: 12,
   },
   activeDot: {
@@ -342,5 +410,70 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: Colors.greenBtn,
+  },
+  rightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  deleteBtn: {
+    opacity: 0.5,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    width: '85%',
+    backgroundColor: Colors.offWhite,
+    borderRadius: 24,
+    padding: 24,
+    alignItems: 'center',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.black,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: Colors.muted,
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    width: '100%',
+    gap: 12,
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: Colors.muted,
+    alignItems: 'center',
+  },
+  modalCancelText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.black,
+  },
+  modalDeleteBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 20,
+    backgroundColor: Colors.greenBtn,
+    alignItems: 'center',
+  },
+  modalDeleteText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFF',
   },
 });
