@@ -1,7 +1,5 @@
-import { ExpoConfig, ConfigContext } from 'expo/config';
 
-export default ({ config }) => ({
-  ...config,
+module.exports = ({ config }) => ({  ...config,
   name: 'RIDO',
   slug: 'rido',
   version: '1.0.0',
@@ -99,7 +97,7 @@ export default ({ config }) => ({
       }
     ],
     [
-      './plugins/withMapbox',
+      './plugins/withMapBox',
       {
         downloadsToken: process.env.MAPBOX_DOWNLOADS_TOKEN
       }
