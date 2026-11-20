@@ -101,7 +101,6 @@ export async function joinTripByCode(shareCode: string): Promise<Trip> {
   const user = getAuth().currentUser;
   if (!user) throw new Error('You must be logged in to join a trip.');
   
-  // 1. Find the trip with this share code
   const q = query(tripsRef, where('shareCode', '==', shareCode.toUpperCase()));
   const snapshot = await getDocs(q);
 
@@ -112,7 +111,6 @@ export async function joinTripByCode(shareCode: string): Promise<Trip> {
   const tripDoc = snapshot.docs[0];
   const tripData = tripDoc.data() as Trip;
 
-  // 2. Cut-off time logic
   if (tripData.scheduledAt) {
     const scheduledDate = tripData.scheduledAt.toDate();
     const now = getTrustedDate();
@@ -132,12 +130,10 @@ export async function joinTripByCode(shareCode: string): Promise<Trip> {
     throw new Error('This trip is already full.');
   }
 
-  // 3. Check if the user is already a member
   if (tripData.members.includes(user.uid)) {
     throw new Error('You are already a member of this trip.');
   }
 
-  // ✅ 4. CHECK FOR SCHEDULE CLASHES (BEFORE UPDATING THE DATABASE)
   if (tripData.scheduledAt) {
     const userTripsQuery = query(tripsRef, where('members', 'array-contains', user.uid));
     const userTripsSnapshot = await getDocs(userTripsQuery);
@@ -155,7 +151,6 @@ export async function joinTripByCode(shareCode: string): Promise<Trip> {
         const existingTripTime = existingTrip.scheduledAt.toDate().getTime();
         const timeDifference = Math.abs(newTripTime - existingTripTime);
 
-        // If the new trip is within 6 hours, THROW ERROR AND STOP THE PROCESS
         if (timeDifference < SIX_HOURS_MS) {
           throw new Error('SCHEDULE_CLASH');
         }
@@ -163,7 +158,6 @@ export async function joinTripByCode(shareCode: string): Promise<Trip> {
     }
   }
 
-  // ✅ 5. ONLY UPDATE DATABASE IF ALL CHECKS PASS
   await updateDoc(doc(getFirestore(), 'trips', tripDoc.id), {
     members: arrayUnion(user.uid),
     memberCount: increment(1),
@@ -184,5 +178,17 @@ export async function leaveTrip(tripId: string, userId: string): Promise<void> {
   await updateDoc(tripRef, {
     members: arrayRemove(userId),
     memberCount: increment(-1),
+  });
+}
+
+// ✅ NEW: Transfer Leadership
+export async function transferLeadership(tripId: string, newLeaderId: string, newLeaderName: string): Promise<void> {
+  const db = getFirestore();
+  const tripRef = doc(db, 'trips', tripId);
+
+  await updateDoc(tripRef, {
+    createdBy: newLeaderId,
+    createdByName: newLeaderName,
+    updatedAt: serverTimestamp(),
   });
 }

@@ -9,28 +9,38 @@ import { Colors } from '../../src/theme/colors';
 import {useAuth } from '../../src/hooks/useAuth'
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {Feather} from '@expo/vector-icons';
-import {CreateTripScreen} from "../../src/components/trip/CreateTripScreen";
 import {useRouter} from 'expo-router';
 import {JoinTripModal} from "../../src/components/trip/JoinTripModal";
+import { CustomNotice } from '../../src/components/ui/CustomNotice';
 
 export default function MapScreen() {
   const { currentCoords } = useLocation();
   const {signOut} = useAuth();
   const insets = useSafeAreaInsets ();
   const router = useRouter();
-
+  const {user} = useAuth();
+  const [showVerifyNotice, setShowVerifyNotice] = useState(false);
   const mapRef = useRef<any>(null);
   const [liveLocation, setLiveLocation] = useState<[number, number] | null>(null);
-  //const [isCreateTripOpen, setIsCreateTripOpen] = useState(false); // New state
 
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
 
   const handleCreateTrip = () => {
+    if (!user?.phone) 
+    {
+      setShowVerifyNotice(true); 
+      return; 
+    }
     router.push('/create-trip');
   };
 
 
   const handleJoinTrip = () => {
+      if (!user?.phone) 
+    {
+    setShowVerifyNotice(true);
+    return;
+    }
       setIsJoinModalOpen(true);
   };
   
@@ -51,12 +61,12 @@ export default function MapScreen() {
         <UpcomingRidesCard />
       </View>
 
-    {/* <View style={styles.aiButtonWrap}> */}
+
         <AIAssistantButton userLocation={currentCoords} />
-     {/* </View> } */ }
+  
 
       <TouchableOpacity 
-        style={[styles.recenterButton, { bottom: 280 }]} // Positioned above Create/Join
+        style={[styles.recenterButton, { bottom: 280 }]}
         onPress={handleRecenter}>
         <Feather name="crosshair" size={24} color={Colors.darkGreen} />
       </TouchableOpacity>
@@ -84,6 +94,16 @@ export default function MapScreen() {
         }}
       />
 
+        <CustomNotice
+          isVisible={showVerifyNotice}
+          onClose={() => setShowVerifyNotice(false)}
+          message="Please verify your phone number first before proceeding."
+          buttonText="Verify Now"
+          onButtonPress={() => {
+            setShowVerifyNotice(false);
+            router.push('/(tabs)/profile');
+          }}
+          />  
     </View>
   );
 }

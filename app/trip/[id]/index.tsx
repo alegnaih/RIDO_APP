@@ -1,13 +1,13 @@
-//app/trip/[id]/index.tsx
+// app/trip/[id]/index.tsx
 import React, { useEffect, useState, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, Modal, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, Modal, ActivityIndicator, FlatList } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getFirestore, doc, onSnapshot } from '@react-native-firebase/firestore';
 import * as Clipboard from 'expo-clipboard';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import Slider from '@react-native-community/slider';
 import * as turf from '@turf/turf';
-import { Feather } from '@expo/vector-icons';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchRiderProfile } from '../../../src/api/profile'; 
 import { Trip } from '../../../src/types/trips';
@@ -15,12 +15,11 @@ import { useAuth } from '../../../src/hooks/useAuth';
 import { useTripDraftStore } from '../../../src/store/useTripDraftStore';
 import { RoutePreviewMap } from '../../../src/components/trip/RoutePreviewMap';
 import { CountdownTimer } from '../../../src/components/trip/CountDownTimer';
-import { updateTrip, leaveTrip } from '../../../src/services/tripService';
+import { updateTrip, leaveTrip, transferLeadership } from '../../../src/services/tripService';
 import { Colors } from '../../../src/theme/colors';
 import { config } from '../../../src/constants/config';
 import { getTrustedTime } from '../../../src/utils/time';
 
-// ✅ 1. Added Weather Icon Helper
 const getWeatherIcon = (condition: string) => {
   switch (condition) {
     case 'Rain': return '🌧️';
@@ -43,14 +42,21 @@ export default function TripDetailsScreen() {
   const [trip, setTrip] = useState<Trip | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Modal state for leaving a trip
+  // Member Leave Flow State
   const [isLeaveModalVisible, setIsLeaveModalVisible] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
   
+  // ✅ Leader Leave Flow State
+  const [leaveStep, setLeaveStep] = useState<'none' | 'prompt' | 'select_member' | 'confirm' | 'success'>('none');
+  const [selectedMember, setSelectedMember] = useState<{ uid: string, name: string } | null>(null);
+  const [isTransferring, setIsTransferring] = useState(false);
+  const [localLeaderOverride, setLocalLeaderOverride] = useState<boolean | null>(null);
+
   // UI Toggles
   const [isRouteVisible, setIsRouteVisible] = useState(true);
   const [isMembersVisible, setIsMembersVisible] = useState(true);
   const [showMaximizedMap, setShowMaximizedMap] = useState(false);
+  const [isMenuVisible, setIsMenuVisible] = useState(false);
 
   // --- Edit States ---
   const [isEditingDetails, setIsEditingDetails] = useState(false);
@@ -75,23 +81,17 @@ export default function TripDetailsScreen() {
 
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
 
-  const handleLeaveTrip = async () => {
-    if (!trip || !user?.uid) return;
-    setIsLeaving(true);
-    try {
-      await leaveTrip(trip.id, user.uid);
-      setIsLeaveModalVisible(false);
-      router.push({
-        pathname: '/trip-left',
-        params: { title: trip.title }
-      });
-    } catch (error) {
-      console.error("Failed to leave trip", error);
-      setIsLeaving(false);
-    }
-  };
+  const isLeader = localLeaderOverride !== null ? localLeaderOverride : (trip?.createdBy === user?.uid);
 
-  const isLeader = trip?.createdBy === user?.uid;
+  const otherMembers = useMemo(() => {
+    if (!trip || !trip.members) return [];
+    return trip.members
+      .filter(uid => uid !== user?.uid)
+      .map(uid => ({
+        uid,
+        name: memberNames[uid] || 'Loading...'
+      }));
+  }, [trip?.members, memberNames, user?.uid]);
 
   const isLocked = useMemo(() => {
     if (!trip) return true;
@@ -248,15 +248,9 @@ export default function TripDetailsScreen() {
   const saveDetails = async () => {
     if (!trip || !id) return;
     try {
-      await updateTrip(id, {
-        title: editTitle,
-        scheduledAt: editDate,
-        startTime: editStartTime,
-      });
+      await updateTrip(id, { title: editTitle, scheduledAt: editDate, startTime: editStartTime });
       setIsEditingDetails(false);
-    } catch {
-      Alert.alert("Error", "Failed to update details.");
-    }
+    } catch { Alert.alert("Error", "Failed to update details."); }
   };
 
   const saveDescription = async () => {
@@ -264,9 +258,7 @@ export default function TripDetailsScreen() {
     try {
       await updateTrip(id, { description: editDesc });
       setIsEditingDesc(false);
-    } catch {
-      Alert.alert("Error", "Failed to update description.");
-    }
+    } catch { Alert.alert("Error", "Failed to update description."); }
   };
 
   const saveStrayThreshold = async () => {
@@ -274,9 +266,7 @@ export default function TripDetailsScreen() {
     try {
       await updateTrip(id, { strayThreshold: editStray });
       setIsEditingStray(false);
-    } catch {
-      Alert.alert("Error", "Failed to update distance.");
-    }
+    } catch { Alert.alert("Error", "Failed to update distance."); }
   };
 
   const handleEditRoute = () => {
@@ -300,11 +290,63 @@ export default function TripDetailsScreen() {
     router.push({ pathname: '/create-trip', params: { mode: 'locations' } });
   };
 
+  // --- LEAVE FLOW HANDLERS ---
+  const handleLeavePress = () => {
+    if (isLeader) {
+      setLeaveStep('prompt');
+    } else {
+      setIsLeaveModalVisible(true);
+    }
+  };
+
+  const handleTransferConfirm = async () => {
+    if (!selectedMember || !trip) return;
+    setIsTransferring(true);
+    try {
+      await transferLeadership(trip.id, selectedMember.uid, selectedMember.name);
+      setLocalLeaderOverride(false); 
+      setLeaveStep('success');
+    } catch (error) {
+      console.error("Transfer failed", error);
+      Alert.alert("Error", "Failed to transfer leadership.");
+      setLeaveStep('select_member');
+    } finally {
+      setIsTransferring(false);
+    }
+  };
+
+  const handleLeaveNow = async () => {
+    if (!trip || !user?.uid) return;
+    setIsLeaving(true);
+    try {
+      await leaveTrip(trip.id, user.uid);
+      setLeaveStep('none');
+      setIsLeaveModalVisible(false);
+      router.replace({
+        pathname: '/trip-left',
+        params: { title: trip.title }
+      });
+    } catch (error) {
+      console.error("Failed to leave trip", error);
+      setIsLeaving(false);
+    }
+  };
+
+  const handleContinueAsMember = () => {
+    setLeaveStep('none');
+    setSelectedMember(null);
+  };
+
   if (loading) return <View style={styles.center}><ActivityIndicator size="large" color={Colors.darkGreen} /></View>;
   if (!trip) return <View style={styles.center}><Text>Trip not found.</Text></View>;
 
   const startDate = trip.scheduledAt?.toDate() || new Date();
   const dateStr = startDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+
+  const durationSecs = trip.routeLegDurations?.reduce((a: number, b: number) => a + b, 0) || 0;
+  const durationMs = durationSecs * 1000;
+  //const bufferMs = 60 * 60 * 1000; // 1 hour
+  const endDate = new Date(startDate.getTime() + durationMs);
 
   const leaderName = (trip.createdByName && trip.createdByName !== 'Rider' && trip.createdByName !== 'Leader')
     ? trip.createdByName 
@@ -320,10 +362,14 @@ export default function TripDetailsScreen() {
             <Feather name="arrow-left" size={24} color={Colors.black} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Trip Details</Text>
-          <View style={{ width: 24 }} />
+          
+          {/* ✅ Three dots menu for Leader Leave */}
+          <TouchableOpacity onPress={() => setIsMenuVisible(true)}>
+            <Feather name="more-vertical" size={24} color={Colors.black} />
+          </TouchableOpacity>
         </View>
 
-        <CountdownTimer targetDate={startDate} status={trip.status} />
+       <CountdownTimer targetDate={startDate} endDate={endDate} status={trip.status} />
 
         {/* Map Preview */}
         <RoutePreviewMap 
@@ -612,8 +658,6 @@ export default function TripDetailsScreen() {
 
       {/* Footer Buttons */}
       <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
-        
-        {/* LEFT BUTTON: Primary Action (Start Trip OR Leave Trip) */}
         {isLeader ? (
           canEdit ? (
             <TouchableOpacity style={styles.startBtn} onPress={() => router.push(`/trip/${trip.id}/live`)}>
@@ -622,50 +666,163 @@ export default function TripDetailsScreen() {
             </TouchableOpacity>
           ) : null
         ) : (
-          <TouchableOpacity style={styles.leaveBtn} onPress={() => setIsLeaveModalVisible(true)}>
+          <TouchableOpacity style={styles.leaveBtn} onPress={handleLeavePress}>
             <Text style={styles.leaveText}>Leave Trip</Text>
           </TouchableOpacity>
         )}
         
-        {/* RIGHT BUTTON: Return Home (Always visible) */}
         <TouchableOpacity style={styles.returnBtn} onPress={() => router.replace('/(tabs)/my-trips')}>
           <Text style={styles.returnText}>Return Home</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Leave Trip Confirmation Modal */}
+      {/* ========================================= */}
+      {/* 🔴 MEMBER LEAVE CONFIRMATION MODAL */}
+      {/* ========================================= */}
       <Modal visible={isLeaveModalVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Feather name="log-out" size={40} color={Colors.darkGreen} style={{ marginBottom: 16 }} />
-            
             <Text style={styles.modalTitle}>Are you sure you want to leave this trip?</Text>
             <Text style={styles.modalSubtitle}>You can rejoin with the trip code.</Text>
-
             <View style={styles.modalButtons}>
-              <TouchableOpacity 
-                style={styles.modalCancelBtn} 
-                onPress={() => setIsLeaveModalVisible(false)}
-                disabled={isLeaving}
-              >
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setIsLeaveModalVisible(false)}>
                 <Text style={styles.modalCancelText}>No</Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.modalConfirmBtn} 
-                onPress={handleLeaveTrip}
-                disabled={isLeaving}
-              >
-                {isLeaving ? (
-                  <ActivityIndicator color="#FFF" size="small" />
-                ) : (
-                  <Text style={styles.modalConfirmText}>Yes</Text>
-                )}
+              <TouchableOpacity style={styles.modalConfirmBtn} onPress={handleLeaveNow} disabled={isLeaving}>
+                {isLeaving ? <ActivityIndicator color="#FFF" size="small" /> : <Text style={styles.modalConfirmText}>Yes</Text>}
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
+
+      {/* ========================================= */}
+      {/* 🟢 LEADER LEAVE FLOW MODALS */}
+      {/* ========================================= */}
+
+      {/* 1. Transfer Leadership Prompt */}
+      <Modal visible={leaveStep === 'prompt'} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.leaderModalContent}>
+            <MaterialCommunityIcons name="crown-outline" size={48} color={Colors.darkGreen} style={{ marginBottom: 16 }} />
+            <Text style={styles.modalTitle}>Please transfer the leadership before leaving.</Text>
+            <Text style={styles.modalSubtitle}>You must pick a new leader first.</Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setLeaveStep('none')}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalConfirmBtn} onPress={() => setLeaveStep('select_member')}>
+                <Text style={styles.modalConfirmText}>Proceed</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 2. Select Member List (Bottom Sheet) */}
+      <Modal visible={leaveStep === 'select_member'} transparent animationType="slide">
+        <View style={styles.bottomSheetOverlay}>
+          <View style={styles.bottomSheet}>
+            <View style={styles.sheetHeader}>
+              <TouchableOpacity onPress={() => setLeaveStep('prompt')}>
+                <Feather name="arrow-left" size={24} color={Colors.black} />
+              </TouchableOpacity>
+              <Text style={styles.sheetTitle}>Transfer Leadership</Text>
+              <View style={{ width: 24 }} />
+            </View>
+            
+            <Text style={styles.sheetSubtitle}>Choose who will lead this trip</Text>
+
+            <FlatList
+              data={otherMembers}
+              keyExtractor={(item) => item.uid}
+              renderItem={({ item, index }) => (
+                <TouchableOpacity 
+                  style={styles.memberRow}
+                  onPress={() => {
+                    setSelectedMember(item);
+                    setLeaveStep('confirm');
+                  }}
+                >
+                  <View style={styles.memberNumber}>
+                    <Text style={styles.memberNumberText}>{index + 1}</Text>
+                  </View>
+                  <Text style={styles.memberNameText}>{item.name}</Text>
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={
+                <Text style={{ textAlign: 'center', color: Colors.muted, marginTop: 20 }}>
+                  No other members to transfer to.
+                </Text>
+              }
+            />
+          </View>
+        </View>
+      </Modal>
+
+      {/* 3. Confirm Transfer */}
+      <Modal visible={leaveStep === 'confirm'} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.leaderModalContent}>
+            <Feather name="repeat" size={48} color={Colors.darkGreen} style={{ marginBottom: 16 }} />
+            <Text style={styles.modalTitle}>Transfer to {selectedMember?.name}?</Text>
+            <Text style={styles.modalSubtitle}>They will become the trip leader.</Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setLeaveStep('select_member')}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalConfirmBtn} onPress={handleTransferConfirm} disabled={isTransferring}>
+                {isTransferring ? <ActivityIndicator color="#FFF" size="small" /> : <Text style={styles.modalConfirmText}>Yes</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 4. Transfer Success */}
+      <Modal visible={leaveStep === 'success'} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.leaderModalContent}>
+            <Feather name="check-circle" size={48} color={Colors.darkGreen} style={{ marginBottom: 16 }} />
+            <Text style={styles.modalTitle}>Successful transfer Leadership</Text>
+            <Text style={styles.modalSubtitle}>{selectedMember?.name} is now a leader</Text>
+            
+            <View style={{ flexDirection: 'row', width: '100%', gap: 12 }}>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={handleContinueAsMember}>
+                <Text style={styles.modalCancelText}>Continue as Member</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalConfirmBtn} onPress={handleLeaveNow} disabled={isLeaving}>
+                {isLeaving ? <ActivityIndicator color="#FFF" size="small" /> : <Text style={styles.modalConfirmText}>Leave Now</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+            {/* Three-Dots Dropdown Menu */}
+      <Modal visible={isMenuVisible} transparent animationType="fade">
+        {/* Tapping the transparent background closes the menu */}
+        <TouchableOpacity 
+          style={{ flex: 1, backgroundColor: 'transparent' }} 
+          activeOpacity={1} 
+          onPress={() => setIsMenuVisible(false)}
+        >
+          <View style={[styles.dropdownMenu, { top: insets.top + 40, right: 20 }]}>
+            <TouchableOpacity 
+              style={styles.dropdownItem} 
+              onPress={() => {
+                setIsMenuVisible(false); // Close menu
+                handleLeavePress();      // Trigger the leave flow
+              }}
+            >
+              <Feather name="log-out" size={18} color={Colors.errorRed} />
+              <Text style={styles.dropdownItemText}>Leave Trip</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
     </View>
   );
 }
@@ -673,38 +830,32 @@ export default function TripDetailsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.offWhite
+    backgroundColor: Colors.offWhite,
   },
   center: {
     flex: 1,
     justifyContent: 'center',
-    alignItems: 'center'
+    alignItems: 'center',
   },
   content: {
     padding: 20,
-    paddingBottom: 120
+    paddingBottom: 120,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20
+    marginBottom: 20,
   },
   headerTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: Colors.muted
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 20
+    color: Colors.muted,
   },
   title: {
     fontSize: 24,
     fontWeight: '700',
-    color: Colors.black
+    color: Colors.black,
   },
   codeBadge: {
     flexDirection: 'row',
@@ -712,47 +863,39 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.greenBg,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 20
+    borderRadius: 20,
   },
   codeText: {
     fontSize: 14,
     fontWeight: '700',
-    color: Colors.greenBtn
+    color: Colors.greenBtn,
   },
   subText: {
     fontSize: 13,
     color: Colors.muted,
-    marginTop: 8
+    marginTop: 8,
   },
   sectionLabel: {
     fontSize: 12,
     fontWeight: '700',
     color: Colors.muted,
-    letterSpacing: 1
-  },
-  descBox: {
-    borderWidth: 1,
-    borderColor: Colors.muted,
-    borderRadius: 12,
-    padding: 14,
-    minHeight: 60,
-    marginTop: 8
-  },
-  descText: {
-    color: Colors.black,
-    fontSize: 14
+    letterSpacing: 1,
   },
   descPlaceholder: {
     borderWidth: 1,
     borderColor: Colors.muted,
     borderRadius: 10,
     padding: 14,
-    minHeight: 60
+    minHeight: 60,
   },
   descPlaceholderText: {
     color: Colors.muted,
     fontStyle: 'italic',
-    fontSize: 14
+    fontSize: 14,
+  },
+  descText:
+  {
+
   },
   descInput: {
     borderWidth: 1,
@@ -761,26 +904,26 @@ const styles = StyleSheet.create({
     padding: 14,
     minHeight: 80,
     textAlignVertical: 'top',
-    backgroundColor: Colors.offWhite
+    backgroundColor: Colors.offWhite,
   },
   doneBtn: {
     alignSelf: 'flex-end',
-    marginTop: 8
+    marginTop: 8,
   },
   doneBtnText: {
     color: Colors.greenBtn,
-    fontWeight: '600'
+    fontWeight: '600',
   },
   detailsHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 20
+    marginTop: 20,
   },
   editText: {
     color: Colors.greenBtn,
     fontSize: 14,
-    fontWeight: '600'
+    fontWeight: '600',
   },
   dateBtn: {
     flexDirection: 'row',
@@ -788,80 +931,80 @@ const styles = StyleSheet.create({
     gap: 6,
     backgroundColor: Colors.backgroundOverlay,
     padding: 8,
-    borderRadius: 8
+    borderRadius: 8,
   },
   dateBtnText: {
     fontSize: 13,
-    color: Colors.black
+    color: Colors.black,
   },
   routeHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginTop: 24,
-    marginBottom: 10
+    marginBottom: 10,
   },
   routeTitleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6
+    gap: 6,
   },
   routeList: {
     backgroundColor: Colors.backgroundOverlay,
     borderRadius: 15,
-    padding: 16
+    padding: 16,
   },
   routeItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 16
+    marginBottom: 16,
   },
   dot: {
     width: 10,
     height: 10,
     borderRadius: 5,
     marginTop: 4,
-    marginRight: 12
+    marginRight: 12,
   },
   locName: {
     fontSize: 14,
     fontWeight: '600',
-    color: Colors.black
+    color: Colors.black,
   },
   locAddress: {
     fontSize: 11,
     color: Colors.muted,
-    marginTop: 2
+    marginTop: 2,
   },
   distanceText: {
     fontSize: 12,
     color: Colors.muted,
-    fontWeight: '500'
+    fontWeight: '500',
   },
   weatherText: {
     fontSize: 12,
-    color: Colors.muted
+    color: Colors.muted,
   },
   rightInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: 8
+    marginLeft: 8,
   },
   bullet: {
     fontSize: 12,
     color: Colors.muted,
-    marginHorizontal: 4
+    marginHorizontal: 4,
   },
   weatherWarning: {
     fontSize: 12,
     color: Colors.muted,
     fontStyle: 'italic',
     marginBottom: 12,
-    textAlign: 'center'
+    textAlign: 'center',
   },
   sliderSection: {
     marginTop: 24,
-    marginBottom: 8
+    marginBottom: 8,
   },
   sliderContainer: {
     marginTop: 8,
@@ -870,22 +1013,22 @@ const styles = StyleSheet.create({
     maxHeight: 50,
     justifyContent: 'center',
     paddingHorizontal: 10,
-    overflow: 'hidden'
+    overflow: 'hidden',
   },
   sliderLabels: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: 4
+    paddingHorizontal: 4,
   },
   sliderLabelText: {
     fontSize: 11,
     color: Colors.muted,
-    fontWeight: '500'
+    fontWeight: '500',
   },
   solidTrackWrapper: {
     height: 20,
     justifyContent: 'center',
-    position: 'relative'
+    position: 'relative',
   },
   solidTrackBg: {
     position: 'absolute',
@@ -893,14 +1036,14 @@ const styles = StyleSheet.create({
     right: 0,
     height: 4,
     backgroundColor: Colors.backgroundOverlay,
-    borderRadius: 2
+    borderRadius: 2,
   },
   solidTrackFill: {
     position: 'absolute',
     left: 0,
     height: 2,
     backgroundColor: Colors.greenBtn,
-    borderRadius: 2
+    borderRadius: 2,
   },
   solidTrackThumb: {
     position: 'absolute',
@@ -909,12 +1052,12 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: Colors.greenBtn,
     marginLeft: -8,
-    top: 5
+    top: 5,
   },
   sliderHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center'
+    alignItems: 'center',
   },
   sliderValue: {
     fontSize: 14,
@@ -923,36 +1066,36 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.greenBg,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 12
+    borderRadius: 12,
   },
   sliderHint: {
     fontSize: 12,
     color: Colors.muted,
     fontStyle: 'italic',
-    marginTop: 8
+    marginTop: 8,
   },
   membersHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginTop: 24,
-    marginBottom: 10
+    marginBottom: 10,
   },
   membersBox: {
     backgroundColor: Colors.backgroundOverlay,
     borderRadius: 15,
-    padding: 16
+    padding: 16,
   },
   memberItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8
+    marginBottom: 8,
   },
   memberName: {
     fontSize: 14,
     color: Colors.black,
     marginLeft: 8,
-    fontWeight: '500'
+    fontWeight: '500',
   },
   leaderBadge: {
     backgroundColor: Colors.greenBg,
@@ -961,7 +1104,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
-    overflow: 'hidden'
+    overflow: 'hidden',
   },
   footer: {
     position: 'absolute',
@@ -975,7 +1118,7 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     backgroundColor: Colors.offWhite,
     borderTopWidth: 1,
-    borderTopColor: Colors.border
+    borderTopColor: Colors.border,
   },
   leaveBtn: {
     paddingVertical: 14,
@@ -983,12 +1126,12 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     borderWidth: 1,
     borderColor: Colors.errorRed,
-    backgroundColor: Colors.offWhite
+    backgroundColor: Colors.offWhite,
   },
   leaveText: {
     color: Colors.errorRed,
     fontWeight: '600',
-    fontSize: 15
+    fontSize: 15,
   },
   returnBtn: {
     paddingVertical: 14,
@@ -996,12 +1139,12 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     borderWidth: 1,
     borderColor: Colors.black,
-    backgroundColor: Colors.offWhite
+    backgroundColor: Colors.offWhite,
   },
   returnText: {
     color: Colors.black,
     fontWeight: '600',
-    fontSize: 15
+    fontSize: 15,
   },
   startBtn: {
     flexDirection: 'row',
@@ -1009,43 +1152,50 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 24,
     borderRadius: 24,
-    backgroundColor: Colors.greenBtn
+    backgroundColor: Colors.greenBtn,
   },
   startText: {
     color: Colors.offWhite,
     fontWeight: '700',
-    fontSize: 15
+    fontSize: 15,
   },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
-    alignItems: 'center'
+    alignItems: 'center',
   },
   modalContent: {
     width: '85%',
     backgroundColor: Colors.offWhite,
     borderRadius: 24,
     padding: 24,
-    alignItems: 'center'
+    alignItems: 'center',
+  },
+  leaderModalContent: {
+    width: '85%',
+    backgroundColor: Colors.offWhite,
+    borderRadius: 24,
+    padding: 24,
+    alignItems: 'center',
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: Colors.black,
     textAlign: 'center',
-    marginBottom: 8
+    marginBottom: 8,
   },
   modalSubtitle: {
     fontSize: 14,
     color: Colors.muted,
     textAlign: 'center',
-    marginBottom: 24
+    marginBottom: 24,
   },
   modalButtons: {
     flexDirection: 'row',
     width: '100%',
-    gap: 12
+    gap: 12,
   },
   modalCancelBtn: {
     flex: 1,
@@ -1053,23 +1203,104 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     borderColor: Colors.muted,
-    alignItems: 'center'
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   modalCancelText: {
     fontSize: 14,
     fontWeight: '600',
-    color: Colors.black
+    color: Colors.black,
   },
   modalConfirmBtn: {
     flex: 1,
     paddingVertical: 12,
     borderRadius: 20,
     backgroundColor: Colors.greenBtn,
-    alignItems: 'center'
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   modalConfirmText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#FFF'
-  }
+    color: '#FFF',
+  },
+  bottomSheetOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  bottomSheet: {
+    backgroundColor: Colors.offWhite,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    maxHeight: '80%',
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  sheetTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.black,
+  },
+  sheetSubtitle: {
+    fontSize: 14,
+    color: Colors.muted,
+    marginBottom: 20,
+  },
+  memberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EAF0E6',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  memberNumber: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: Colors.darkGreen,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  memberNumberText: {
+    color: '#FFF',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  memberNameText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.black,
+  },
+    dropdownMenu: {
+    position: 'absolute',
+    backgroundColor: Colors.offWhite,
+    borderRadius: 12,
+    padding: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+    minWidth: 150,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  dropdownItemText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.errorRed,
+  },
 });

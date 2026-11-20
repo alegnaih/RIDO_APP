@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { View, StyleSheet, TextInput, TouchableOpacity, Text, FlatList, Platform, Keyboard } from 'react-native';
+import { View, StyleSheet, TextInput, TouchableOpacity, Text, FlatList, Platform, Keyboard, Alert } from 'react-native';
 import MapboxGL from '@rnmapbox/maps';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,7 +12,8 @@ import { TripDetailsSheet } from './TripDetailsSheet';
 import { SetLocationsSheet } from './SetLocationsSheet';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTripDraftStore } from '../../store/useTripDraftStore';
-import { Colors } from '../../theme/colors'; // ✅ Imported Colors
+import { CustomNotice } from '../ui/CustomNotice';
+import { Colors } from '../../theme/colors'; 
 
 interface CreateTripScreenProps {
   onClose: () => void;
@@ -23,7 +24,10 @@ export function CreateTripScreen({ onClose }: CreateTripScreenProps) {
   const cameraRef = useRef<MapboxGL.Camera>(null);
   const router = useRouter();
   const { mode } = useLocalSearchParams<{ mode?: string }>();
-
+  
+  // ✅ State for your custom modal
+  const [noticeConfig, setNoticeConfig] = useState<{visible: boolean, message: string}>({ visible: false, message: '' });
+  
   const trip = useCreateTrip(mode === 'locations' ? 'locations' : 'details');
   const draft = useTripDraftStore();
   
@@ -103,7 +107,7 @@ export function CreateTripScreen({ onClose }: CreateTripScreenProps) {
     try {
       const response = await fetch(
         `https://api.mapbox.com/search/searchbox/v1/retrieve/${suggestion.mapbox_id}?` +
-        `access_token=${config.mapboxAccessToken}` +
+        `&access_token=${config.mapboxAccessToken}` +
         `&session_token=${sessionToken}`
       );
       const data = await response.json();
@@ -187,7 +191,6 @@ export function CreateTripScreen({ onClose }: CreateTripScreenProps) {
             id="meeting"
             coordinate={[trip.meetingPoint.location.longitude, trip.meetingPoint.location.latitude]}
           >
-            {/* ✅ Colors.greenBtn */}
             <View style={[styles.marker, { backgroundColor: Colors.greenBtn }]} />
           </MapboxGL.PointAnnotation>
         )}
@@ -197,7 +200,6 @@ export function CreateTripScreen({ onClose }: CreateTripScreenProps) {
             id="destination"
             coordinate={[trip.endPoint.location.longitude, trip.endPoint.location.latitude]}
           >
-            {/* ✅ Colors.danger */}
             <View style={[styles.marker, { backgroundColor: Colors.danger }]} />
           </MapboxGL.PointAnnotation>
         )}
@@ -208,7 +210,6 @@ export function CreateTripScreen({ onClose }: CreateTripScreenProps) {
             id={`stop-${i}`}
             coordinate={[stop.location.longitude, stop.location.latitude]}
           >
-            {/* ✅ Colors.warning */}
             <View style={[styles.marker, { backgroundColor: Colors.warning }]} />
           </MapboxGL.PointAnnotation>
         ))}
@@ -217,7 +218,6 @@ export function CreateTripScreen({ onClose }: CreateTripScreenProps) {
       {/* Search Bar Overlay */}
       <View style={[styles.searchContainer, { top: insets.top + 12, zIndex: 100 }]}>
         <View style={styles.inputWrapper}>
-          {/* ✅ Colors.muted */}
           <Ionicons name="search" size={18} color={Colors.muted} />
           <TextInput
             style={styles.searchInput}
@@ -228,7 +228,6 @@ export function CreateTripScreen({ onClose }: CreateTripScreenProps) {
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => { setSearchQuery(''); setSuggestions([]); }}>
-              {/* ✅ Colors.mediumGray */}
               <Ionicons name="close-circle" size={18} color={Colors.mediumGray} />
             </TouchableOpacity>
           )}
@@ -242,7 +241,6 @@ export function CreateTripScreen({ onClose }: CreateTripScreenProps) {
               keyExtractor={(item) => item.mapbox_id}
               renderItem={({ item }) => (
                 <TouchableOpacity style={styles.resultItem} onPress={() => handleSelectSuggestion(item)}>
-                  {/* ✅ Colors.greenBtn */}
                   <Ionicons name="location-outline" size={16} color={Colors.greenBtn} />
                   <View style={{ flex: 1, marginLeft: 10 }}>
                     <Text style={styles.resultText} numberOfLines={1}>{item.name}</Text>
@@ -286,9 +284,9 @@ export function CreateTripScreen({ onClose }: CreateTripScreenProps) {
             onMoveLocation={trip.moveLocation} 
             onBack={() => {
               if (mode === 'locations') {
-                router.back(); // Goes back to trip-confirm or trip/[id]
+                router.back(); 
               } else {
-                trip.setSheetMode('details'); // Goes back to the Details sheet
+                trip.setSheetMode('details'); 
               }
             }}
             onCreate={trip.handleCreate}
@@ -296,6 +294,16 @@ export function CreateTripScreen({ onClose }: CreateTripScreenProps) {
           />
         )}
       </View>
+
+      {/* ✅ Added the CustomNotice component here! */}
+      <CustomNotice
+        isVisible={noticeConfig.visible}
+        onClose={() => setNoticeConfig({ visible: false, message: '' })}
+        title="Notice"
+        message={noticeConfig.message}
+        buttonText="Okay"
+      />
+
     </View>
   );
 }

@@ -1,12 +1,11 @@
 // app/(auth)/signup.tsx
-import React, { useEffect, useState } from 'react';
-import { StyleSheet, View, Text, Image, KeyboardAvoidingView, Platform, ScrollView, TouchableOpacity, Alert } from 'react-native'; // ✅ Added Alert
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import React, { useState } from 'react';
+import { StyleSheet, View, Text, Image, KeyboardAvoidingView, Platform, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useAuthDraftStore } from '../../src/store/useAuthDraftStore';
 import { AuthTextField } from '../../src/components/auth/AuthTextField';
 import { AuthDivider } from '../../src/components/auth/AuthDivider';
-import { AuthLink } from '../../src/components/auth/AuthLink';
 import { RoadButton } from '../../src/components/ui/RoadButton';
 import { GoogleSigninButton } from '../../src/components/auth/GoogleSigninButton';
 import { isValidPhoneNumber, normalizePhoneNumber } from '../../src/utils/phone';
@@ -16,38 +15,22 @@ const MINIMUM_PASSWORD_LENGTH = 6;
 
 export default function SignupScreen() {
   const router = useRouter();
-  const { verifiedPhone } = useLocalSearchParams<{ verifiedPhone?: string }>();
-  
-  const { signUpWithEmail, signInWithGoogle, signOutGoogle, error, clearError, isLoading, isAuthenticated } = useAuth();
-  
+
+  const { signUpWithEmail, signInWithGoogle, signOutGoogle, error, clearError, isLoading } = useAuth();
+
   const draft = useAuthDraftStore();
   const [formError, setFormError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (verifiedPhone) {
-      draft.setField('phone', verifiedPhone);
-      draft.setField('isPhoneVerified', true);
-    }
-  }, [verifiedPhone]);
 
   const clearMessages = () => {
     if (formError) setFormError(null);
     if (error) clearError();
   };
 
-  const handlePhoneChange = (val: string) => {
-    draft.setField('phone', val);
-    clearMessages();
-    if (val !== verifiedPhone) {
-      draft.setField('isPhoneVerified', false);
-    }
-  };
-
   const validate = (): string | null => {
     if (!draft.name.trim()) return 'Enter your full name.';
-    
+
     const email = draft.email.trim().toLowerCase();
-    
+
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return 'Enter a valid email address.';
@@ -58,7 +41,7 @@ export default function SignupScreen() {
     }
 
     const badDomains = ['gail.com', 'gamil.com', 'gmaill.com', 'yahoo.con', 'hotmail.con', 'outlook.con'];
-    if (badDomains.some(domain => email.includes(domain))) {
+    if (badDomains.some((domain) => email.includes(domain))) {
       return 'Please check your email spelling.';
     }
 
@@ -68,14 +51,13 @@ export default function SignupScreen() {
     if (draft.password !== draft.confirmPassword) {
       return 'Passwords do not match.';
     }
-    
+
+    // ✅ In the new flow the phone is verified AFTER account creation,
+    // so we only validate that it's a well-formed number here.
     if (!isValidPhoneNumber(draft.phone)) {
       return 'Enter a valid mobile number, for example 09171234567.';
     }
-    if (!draft.isPhoneVerified) {
-      return 'Please verify your phone number first.';
-    }
-  
+
     return null;
   };
 
@@ -87,43 +69,51 @@ export default function SignupScreen() {
     }
 
     setFormError(null);
+    const phone = normalizePhoneNumber(draft.phone);
     const success = await signUpWithEmail(
-      draft.name.trim(), 
-      draft.email.trim(), 
-      draft.password, 
-      normalizePhoneNumber(draft.phone)
+      draft.name.trim(),
+      draft.email.trim(),
+      draft.password,
+      phone,
     );
-    
+
     if (success) {
       draft.reset();
-      router.replace('/(tabs)/map');
+      // ✅ Account created — now verify the phone (which links it to this account)
+      router.replace({
+        pathname: '/(auth)/phone-verify',
+        params: { phone, flow: 'signup' },
+      });
     }
   };
 
-  // ✅ Updated with the Alert Prompt
   const handleGoogle = async () => {
     clearMessages();
     const result = await signInWithGoogle();
 
     if (result === 'LINK_PROMPT') {
       Alert.alert(
-        "Account Exists",
-        "This email is already registered with a password. Do you want to log in instead?",
+        'Account Exists',
+        'This email is already registered with a password. Do you want to log in instead?',
         [
-          { text: "No", style: "cancel", onPress: async () => {
+          {
+            text: 'No',
+            style: 'cancel',
+            onPress: async () => {
               await signOutGoogle();
-            }},
-          { 
-            text: "Yes", 
+            },
+          },
+          {
+            text: 'Yes',
             onPress: async () => {
               const success = await signInWithGoogle(true);
               if (success) {
                 draft.reset();
                 router.replace('/(tabs)/map');
               }
-            } 
-          }
-        ]
+            },
+          },
+        ],
       );
     } else if (result === true) {
       draft.reset();
@@ -132,13 +122,16 @@ export default function SignupScreen() {
   };
 
   const canSubmit =
-    Boolean(draft.name.trim()) && Boolean(draft.email.trim()) && Boolean(draft.password) && 
-    Boolean(draft.confirmPassword) && Boolean(draft.phone) && draft.isPhoneVerified && !isLoading;
+    Boolean(draft.name.trim()) &&
+    Boolean(draft.email.trim()) &&
+    Boolean(draft.password) &&
+    Boolean(draft.confirmPassword) &&
+    Boolean(draft.phone) &&
+    !isLoading;
 
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        
         <View style={styles.logoWrap}>
           <Image style={styles.logo} source={require('../../assets/icon.png')} resizeMode="contain" />
           <Text style={styles.subtitle}>Join the crew start riding with RIDO.</Text>
@@ -158,7 +151,7 @@ export default function SignupScreen() {
             value={draft.email}
             onChangeText={(val) => { draft.setField('email', val); clearMessages(); }}
             placeholder="Email"
-            leftIcon='email'
+            leftIcon="email"
             keyboardType="email-address"
             autoCapitalize="none"
             editable={!isLoading}
@@ -184,33 +177,16 @@ export default function SignupScreen() {
 
           <AuthTextField
             value={draft.phone}
-            onChangeText={handlePhoneChange}
+            onChangeText={(val) => { draft.setField('phone', val); clearMessages(); }}
             placeholder="Mobile number (e.g. 09171234567)"
-            leftIcon='phone'
+            leftIcon="phone"
             keyboardType="phone-pad"
-            editable={!isLoading && !draft.isPhoneVerified}
+            editable={!isLoading}
           />
-          
-          {!draft.isPhoneVerified ? (
-            <Text style={styles.verify}>
-              Verify your phone number first to continue. We’ll send you a verification code via SMS.{' '}
-              <Text 
-                style={[styles.verifyLink, (!draft.phone || isLoading) && { opacity: 0.5 }]}
-                onPress={() => {
-                  if (draft.phone && !isLoading) {
-                    router.push({
-                      pathname: '/(auth)/phone-verify',
-                      params: { phone: draft.phone, flow: 'signup' }
-                    });
-                  }
-                }}
-              >
-                Send Code
-              </Text>
-            </Text>
-          ) : (
-            <Text style={styles.verifyText}>✓ Phone Verified</Text>
-          )}
+
+          <Text style={styles.verify}>
+            We’ll send a verification code to this number after you create your account.
+          </Text>
 
           {formError && <Text style={styles.error}>{formError}</Text>}
           {error && <Text style={styles.error}>{error}</Text>}
@@ -219,7 +195,7 @@ export default function SignupScreen() {
         <RoadButton title="Create Account" onPress={handleSignUp} disabled={!canSubmit} loading={isLoading} />
 
         <View style={styles.dividerWrap}><AuthDivider label="or" /></View>
-        
+
         <View style={styles.googleWrap}>
           <GoogleSigninButton onPress={handleGoogle} loading={isLoading} />
         </View>
@@ -238,7 +214,7 @@ export default function SignupScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: Colors.offWhite
+    backgroundColor: Colors.offWhite,
   },
   content: {
     flexGrow: 1,
@@ -266,15 +242,10 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   verify: {
+    fontSize: 12,
+    color: Colors.black,
+    opacity: 0.7,
     marginBottom: 18,
-  },
-  verifyText: {
-    fontSize: 13,
-    color: Colors.darkGreen,
-  },
-  verifyLink: {
-    color: '#4285F4',
-    fontWeight: '600',
   },
   error: {
     color: Colors.errorRed,
@@ -304,7 +275,7 @@ const styles = StyleSheet.create({
   },
   footerLink: {
     fontSize: 13,
-    color: '#4285F4', 
+    color: '#4285F4',
     fontWeight: '600',
   },
 });

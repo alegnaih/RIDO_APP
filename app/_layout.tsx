@@ -11,7 +11,10 @@ import { useAuth } from '../src/hooks/useAuth';
 import { config } from '../src/constants/config';
 import {syncServerTime } from '../src/utils/time';
 import {BottomSheetModalProvider} from '@gorhom/bottom-sheet';
+import { LogBox } from 'react-native';
 
+// Ignore all log notifications (temporary for development)
+LogBox.ignoreAllLogs();
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 // Set once for the whole process — no component needs to repeat this.

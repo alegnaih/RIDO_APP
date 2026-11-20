@@ -1,11 +1,11 @@
 // app/(tabs)/weather.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { getFirestore, collection, query, where, onSnapshot } from '@react-native-firebase/firestore';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient'; // ✅ Import Gradient
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { useAuth } from '../../src/hooks/useAuth';
 import { Trip } from '../../src/types/trips';
@@ -34,11 +34,11 @@ const getWeatherIcon = (condition?: string) => {
 
 const getWeatherGradient = (condition?: string) => {
   switch (condition) {
-    case 'Clear': return ['#f6f4e4', '#fcf5b8']; // Yellow
-    case 'Clouds': return ['#e9f6fc', '#a9c0cb']; // Light Blue
-    case 'Rain': return ['#c5e2ef', '#3b99c4']; // Darker Blue
-    case 'Thunderstorm': return ['#b1b9e7', '#5a66a1']; // Purple/Blue
-    default: return ['#F5F5F5', '#E0E0E0']; // Gray
+    case 'Clear': return ['#f6f4e4', '#fcf5b8'];
+    case 'Clouds': return ['#e9f6fc', '#a9c0cb'];
+    case 'Rain': return ['#c5e2ef', '#3b99c4'];
+    case 'Thunderstorm': return ['#b1b9e7', '#5a66a1'];
+    default: return ['#F5F5F5', '#E0E0E0'];
   }
 };
 
@@ -50,6 +50,14 @@ export default function WeatherListScreen() {
   const [trips, setTrips] = useState<TripWithWeather[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSyncReady, setIsSyncReady] = useState(isTimeSynced());
+  
+  // ✅ Ticker to update the UI automatically when a trip ends
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => setTick(t => t + 1), 10000); // update every 10 seconds
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (isSyncReady) return;
@@ -70,13 +78,11 @@ export default function WeatherListScreen() {
 
     const unsubscribe = onSnapshot(q, async (snapshot) => {
       const fetchedTrips: TripWithWeather[] = [];
-      const now = getTrustedTime();
-
+      
       snapshot.forEach((doc) => {
         const trip = { id: doc.id, ...doc.data() } as TripWithWeather;
-        const tripDate = trip.scheduledAt?.toDate()?.getTime() || 0;
-        
-        if (tripDate > now || trip.status === 'active') {
+        // We fetch all valid trips, and filter them later during render based on the live clock
+        if (trip.status !== 'cancelled' && trip.status !== 'completed') {
           fetchedTrips.push(trip);
         }
       });
@@ -95,9 +101,9 @@ export default function WeatherListScreen() {
           const res = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${trip.meetingPoint.location.latitude}&lon=${trip.meetingPoint.location.longitude}&appid=${config.openWeatherApiKey}&units=metric`);
           const data = await res.json();
           if (data.list && data.list.length > 0) {
-            const tripTimeUnix = startDate.getTime() / 1000;
+            const referenceTime = Math.max(startDate.getTime(), getTrustedTime()) / 1000;
             const closest = data.list.reduce((prev: any, curr: any) => 
-              (Math.abs(curr.dt - tripTimeUnix) < Math.abs(prev.dt - tripTimeUnix) ? curr : prev)
+              (Math.abs(curr.dt - referenceTime) < Math.abs(prev.dt - referenceTime) ? curr : prev)
             );
             return { 
               ...trip, 
@@ -119,24 +125,36 @@ export default function WeatherListScreen() {
     return () => unsubscribe();
   }, [user?.uid, isSyncReady]);
 
+  // ✅ Dynamically filter out trips that have ended, recalculated every tick
+  const visibleTrips = useMemo(() => {
+    const now = getTrustedTime();
+    return trips.filter(trip => {
+      const tripDate = trip.scheduledAt?.toDate()?.getTime() || 0;
+      const durationSecs = trip.routeLegDurations?.reduce((a: number, b: number) => a + b, 0) || 0;
+      const endTime = tripDate + (durationSecs * 1000);
+      
+      return now < endTime;
+    });
+  }, [trips, tick]);
+
   if (loading || !isSyncReady) return <View style={styles.center}><ActivityIndicator size="large" color={Colors.greenBtn} /></View>;
 
   return (
     <View style={styles.container}>
       <FlatList
-        data={trips}
+        data={visibleTrips} // ✅ Use the filtered list here
         keyExtractor={(item) => item.id}
         contentContainerStyle={[styles.content, { paddingTop: insets.top + 20 }]}
         ListHeaderComponent={
           <View style={styles.header}>
             <Text style={styles.headerTitle}>Weather</Text>
-            <Text style={styles.headerSubtitle}>Your upcoming convoy forecasts</Text>
+            <Text style={styles.headerSubtitle}>Forecasts for your ongoing & upcoming convoys</Text>
           </View>
         }
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <Feather name="cloud-off" size={48} color="#CCC" />
-            <Text style={styles.emptyText}>No upcoming trips</Text>
+            <Text style={styles.emptyText}>No active trips</Text>
             <Text style={styles.emptySub}>Create a trip to see its weather forecast.</Text>
           </View>
         }
@@ -151,10 +169,7 @@ export default function WeatherListScreen() {
               onPress={() => router.push(`/trip/${item.id}/weather`)}
               activeOpacity={0.8}
             >
-              
               <LinearGradient colors={gradientColors as [string, string]} style={styles.cardGradient}>
-                
-                {/* Left Side: Trip Details */}
                 <View style={styles.cardLeft}>
                   <Text style={styles.tripTitle}>{item.title}</Text>
                   <Text style={styles.tripDate}>{dateStr} at {item.startTime}</Text>
@@ -166,7 +181,6 @@ export default function WeatherListScreen() {
                   </View>
                 </View>
 
-                {/* Right Side: Weather Icon & Temp */}
                 {item.weatherSummary?.isAvailable ? (
                   <View style={styles.cardRight}>
                     <MaterialCommunityIcons 
@@ -182,7 +196,6 @@ export default function WeatherListScreen() {
                     <Feather name="clock" size={32} color={Colors.muted} />
                   </View>
                 )}
-
               </LinearGradient>
             </TouchableOpacity>
           );
@@ -220,14 +233,10 @@ const styles = StyleSheet.create({
     color: Colors.muted,
     fontWeight: '500'
   },
-  
-  /* ✅ New Card Styles */
-  cardWrapper:
-  {
-      marginBottom: 16,
-      width: '100%',
+  cardWrapper: {
+    marginBottom: 16,
+    width: '100%',
   },
-
   cardGradient: {  
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -243,11 +252,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 8,
   },
-
   cardLeft: {
     flex: 1,
   },
-
   tripTitle: {
     fontSize: 18,
     fontWeight: '700',
@@ -283,8 +290,6 @@ const styles = StyleSheet.create({
     color: Colors.black,
     marginTop: 4,
   },
-
-  /* Empty State */
   emptyState: {
     alignItems: 'center',
     marginTop: 60

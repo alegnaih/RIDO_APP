@@ -1,4 +1,5 @@
-// src/utils/generateDisplayId.ts
+import { getFirebaseFirestore } from '../api/firebase';
+import { collection, query, where, getDocs } from '@react-native-firebase/firestore';
 
 export function generateDisplayId(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Avoids confusing characters
@@ -9,18 +10,21 @@ export function generateDisplayId(): string {
   return result;
 }
 
-// ✅ Helper to check if the code is unique in Firestore
-import { getFirestore, collection, query, where, getDocs } from '@react-native-firebase/firestore';
-
 export async function generateUniqueDisplayId(): Promise<string> {
   let isUnique = false;
   let newId = '';
 
   while (!isUnique) {
     newId = generateDisplayId();
-    const q = query(collection(getFirestore(), 'users'), where('displayId', '==', newId));
+    
+    // Use your getFirebaseFirestore wrapper instead of getFirestore()
+    const q = query(collection(getFirebaseFirestore(), 'users'), where('displayId', '==', newId));
     const snapshot = await getDocs(q);
-    if (snapshot.empty) {
+    
+    // Safety check to prevent "forEach of null" or "empty of null" errors
+    if (!snapshot) {
+      isUnique = true; // Fallback if snapshot is null
+    } else if (snapshot.empty) {
       isUnique = true;
     }
   }

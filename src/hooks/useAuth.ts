@@ -5,6 +5,7 @@ import { getFirebaseAuth } from '../api/firebase';
 import { fetchRiderProfile } from '../api/profile';
 import {
   confirmPhoneCode as confirmPhoneCodeRequest,
+  linkPhoneToCurrentUser,
   registerWithEmailPassword,
   requestPhoneVerificationCode,
   signInWithEmailPassword,
@@ -58,13 +59,14 @@ export function useAuth() {
         isOnline: true,
         lastSeen: Date.now(),
       };
-      
+
       try {
         const riderProfile = await fetchRiderProfile(signedInUser.uid);
         setUser({
           ...fallback,
           ...riderProfile,
           name: riderProfile?.name || signedInUser.displayName || signedInUser.email?.split('@')[0] || '',
+          phone: signedInUser.phoneNumber?? '',
         });
         setLoading(false);
       } catch (caught) {
@@ -105,14 +107,13 @@ export function useAuth() {
     [runAuthAction],
   );
 
-  // ✅ Updated to capture displayId and update store immediately
   const signUpWithEmail = useCallback(
     async (name: string, email: string, password: string, phone: string) => {
       setLoading(true);
       clearError();
       try {
         const displayId = await registerWithEmailPassword({ name, email, password, phone });
-        updateUser({ name, displayId }); 
+        updateUser({ name, displayId });
         return true;
       } catch (caught) {
         setError(getAuthErrorMessage(caught, 'Failed to create your account.'));
@@ -124,7 +125,6 @@ export function useAuth() {
     [updateUser, setLoading, clearError, setError],
   );
 
-  // ✅ Updated to capture displayId
   const signInWithGoogle = useCallback(
     async (forceLink: boolean = false): Promise<boolean | 'LINK_PROMPT'> => {
       setLoading(true);
@@ -132,7 +132,7 @@ export function useAuth() {
       try {
         const displayId = await signInWithGoogleAccount(forceLink);
         if (displayId) {
-          updateUser({ displayId }); // ✅ Update immediately
+          updateUser({ displayId });
         }
         return true;
       } catch (caught: any) {
@@ -164,7 +164,6 @@ export function useAuth() {
     [setLoading, clearError, setError],
   );
 
-  // ✅ Updated to capture displayId
   const confirmPhoneCode = useCallback(
     async (verificationId: string, code: string, skipFirestoreSave = false) => {
       setLoading(true);
@@ -172,11 +171,39 @@ export function useAuth() {
       try {
         const displayId = await confirmPhoneCodeRequest(verificationId, code, skipFirestoreSave);
         if (displayId) {
-          updateUser({ displayId }); 
+          updateUser({ displayId });
         }
         return true;
       } catch (caught) {
         setError(getAuthErrorMessage(caught, 'Failed to verify that code.'));
+        return false;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [updateUser, setLoading, clearError, setError],
+  );
+
+  // ✅ NEW: links phone to the currently signed-in user (signup flow)
+  const linkPhone = useCallback(
+    async (verificationId: string, code: string, phoneNumber: string): Promise<boolean> => {
+      setLoading(true);
+      clearError();
+      try {
+        await linkPhoneToCurrentUser(verificationId, code, phoneNumber);
+        const auth = getFirebaseAuth();
+        updateUser({ phone: auth.currentUser?.phoneNumber ?? '' });
+        return true;
+      } catch (caught: any) {
+        if (caught?.code === 'auth/credential-already-in-use') {
+          setError(
+            'This phone number is already linked to another account. Please use a different number.'
+          );
+        } else if (caught?.code === 'auth/provider-already-linked') {
+          setError('This account already has a phone number linked.');
+        } else {
+          setError(getAuthErrorMessage(caught, 'Failed to verify that code.'));
+        }
         return false;
       } finally {
         setLoading(false);
@@ -216,6 +243,7 @@ export function useAuth() {
     signInWithGoogle,
     requestPhoneCode,
     confirmPhoneCode,
+    linkPhone, // ✅ NEW
     requestPasswordReset,
     signOut,
     clearError,

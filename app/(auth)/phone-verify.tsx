@@ -1,14 +1,12 @@
 // app/(auth)/phone-verify.tsx
 import React, { useEffect, useState, useRef } from 'react';
 import { StyleSheet, View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
-import { useRouter,useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../src/hooks/useAuth';
-import { AuthScreen } from '../../src/components/auth/AuthScreen';
 import { AuthTextField } from '../../src/components/auth/AuthTextField';
-import { AuthLink } from '../../src/components/auth/AuthLink';
 import { RoadButton } from '../../src/components/ui/RoadButton';
 import { isValidPhoneNumber, normalizePhoneNumber } from '../../src/utils/phone';
-import {Colors} from '../../src/theme/colors';
+import { Colors } from '../../src/theme/colors';
 
 const VERIFICATION_CODE_LENGTH = 6;
 
@@ -16,9 +14,9 @@ export default function PhoneVerifyScreen() {
   const router = useRouter();
 
   const { phone: paramPhone, flow } = useLocalSearchParams<{ phone?: string; flow?: string }>();
+ const isLinkFlow = flow === 'signup' || flow === 'link' || flow === 'profile';
 
-  const { requestPhoneCode, confirmPhoneCode, signOut, error, clearError, isLoading, isAuthenticated} =
-    useAuth();
+  const { requestPhoneCode, confirmPhoneCode, linkPhone, error, clearError, isLoading } = useAuth();
 
   const [isCodeStep, setIsCodeStep] = useState(false);
   const [phone, setPhone] = useState(paramPhone ? normalizePhoneNumber(paramPhone) : '');
@@ -26,37 +24,27 @@ export default function PhoneVerifyScreen() {
   const [verificationId, setVerificationId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
-    // Timer for resend
   const [timer, setTimer] = useState(60);
   const inputRef = useRef<TextInput>(null);
 
-  const [isParamsReady, setIsParamsReady] = useState(false);
-  useEffect(() => {
-      if (flow !== undefined) {
-        setIsParamsReady(true);
-      }
-    }, [flow]);
+  const hasAutoSentRef = useRef(false);
 
-  // If they came from Signup, automatically send the code
+  // Auto-send on first mount if we came here with a phone (signup flow)
   useEffect(() => {
-    if (paramPhone && !isCodeStep) {
+    if (paramPhone && !hasAutoSentRef.current) {
+      hasAutoSentRef.current = true;
       handleSendCode();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paramPhone]);
 
-  useEffect(() => {
-    // Params are loaded on mount. We just set ready to true.
-    setIsParamsReady(true);
-  }, []);
-
-
+  // Resend timer
   useEffect(() => {
     if (isCodeStep && timer > 0) {
       const interval = setInterval(() => setTimer((prev) => prev - 1), 1000);
       return () => clearInterval(interval);
     }
   }, [isCodeStep, timer]);
-
 
   const handleSendCode = async () => {
     if (!isValidPhoneNumber(phone)) {
@@ -65,12 +53,14 @@ export default function PhoneVerifyScreen() {
     }
 
     setFormError(null);
-    const id = await requestPhoneCode(normalizePhoneNumber(phone));
+    if (error) clearError();
 
+    const id = await requestPhoneCode(normalizePhoneNumber(phone));
     if (id) {
       setVerificationId(id);
       setIsCodeStep(true);
       setTimer(60);
+      setCode('');
     }
   };
 
@@ -79,43 +69,77 @@ export default function PhoneVerifyScreen() {
       setFormError('Request a new code and try again.');
       return;
     }
-
     if (code.length < VERIFICATION_CODE_LENGTH) {
       setFormError(`Enter the ${VERIFICATION_CODE_LENGTH}-digit code from the SMS.`);
       return;
     }
 
     setFormError(null);
-    const isSignup = flow === 'signup';
-    const success = await confirmPhoneCode(verificationId, code, isSignup);
+    if (error) clearError();
 
-     if (success) {
-      if (flow === 'signup') {
-        // Firebase signs the user in automatically. We must sign them out 
-        // so they can finish creating their Email/Password account.
-        await signOut();
-        // Go back to signup with the verified phone number
-          router.replace(`/(auth)/signup?verifiedPhone=${encodeURIComponent(phone)}`);
-       
-      } else {
-        // ✅ It's a normal login, go straight to the Map!
+    if (isLinkFlow) {
+      // ✅ LINK the phone to the already-created email/password account.
+      const success = await linkPhone(verificationId, code, normalizePhoneNumber(phone));
+      if (success) {
+        router.replace('/(tabs)/map');
+      }
+    } else {
+      // Existing phone-login flow
+      const success = await confirmPhoneCode(verificationId, code, false);
+      if (success) {
         router.replace('/(tabs)/map');
       }
     }
   };
 
+  const handleChangeNumber = () => {
+    setIsCodeStep(false);
+    setVerificationId(null);
+    setCode('');
+    setTimer(60);
+    setFormError(null);
+    if (error) clearError();
+  };
 
- return (
+  const handleBackOrSkip = () => {
+    if (isLinkFlow) {
+      // Account is already created; they can verify later from settings.
+      router.replace('/(tabs)/map');
+    } else {
+      router.back();
+    }
+  };
+
+  return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        
         <Text style={styles.title}>Verify Code</Text>
         <Text style={styles.subtitle}>
           Please enter the code we just sent to{'\n'}
-          <Text style={{ fontWeight: '600' }}>{isCodeStep ? normalizePhoneNumber(phone) : 'your phone number'}</Text>
+          <Text style={{ fontWeight: '600' }}>
+            {isCodeStep ? normalizePhoneNumber(phone) : 'your phone number'}
+          </Text>
         </Text>
 
-        {/* Custom OTP Boxes */}
+        {/* ✅ Phone entry (visible only when not in code step) */}
+        {!isCodeStep && (
+          <View style={styles.phoneInputWrap}>
+            <AuthTextField
+              value={phone}
+              onChangeText={(val) => {
+                setPhone(val);
+                if (formError) setFormError(null);
+                if (error) clearError();
+              }}
+              placeholder="Mobile number (e.g. 09171234567)"
+              leftIcon="phone"
+              keyboardType="phone-pad"
+              editable={!isLoading}
+            />
+          </View>
+        )}
+
+        {/* OTP boxes */}
         {isCodeStep && (
           <View style={styles.otpContainer}>
             {[...Array(VERIFICATION_CODE_LENGTH)].map((_, index) => {
@@ -126,8 +150,7 @@ export default function PhoneVerifyScreen() {
                 </View>
               );
             })}
-            
-            {/* Hidden TextInput that actually captures the typing */}
+
             <TextInput
               ref={inputRef}
               style={styles.hiddenInput}
@@ -144,10 +167,9 @@ export default function PhoneVerifyScreen() {
           </View>
         )}
 
-        {/* ✅ FIXED: Added !! and String() to prevent raw strings from being rendered */}
         {!!(formError ?? error) && <Text style={styles.error}>{String(formError ?? error)}</Text>}
 
-        {/* Resend Code / Timer */}
+        {/* Resend / change number */}
         {isCodeStep && (
           <View style={styles.resendWrap}>
             <Text style={styles.resendText}>Didn't receive OTP?</Text>
@@ -161,40 +183,72 @@ export default function PhoneVerifyScreen() {
           </View>
         )}
 
+        {isCodeStep && isLinkFlow && (
+          <TouchableOpacity onPress={handleChangeNumber} style={styles.changeNumberInline} disabled={isLoading}>
+            <Text style={styles.changeNumberText}>Use a different number</Text>
+          </TouchableOpacity>
+        )}
+
         {/* Actions */}
         <View style={styles.buttonWrap}>
           {isCodeStep ? (
-            <RoadButton 
-              title="Verify" 
-              onPress={handleVerifyCode} 
-              loading={isLoading} 
-              disabled={code.length < VERIFICATION_CODE_LENGTH} 
+            <RoadButton
+              title="Verify"
+              onPress={handleVerifyCode}
+              loading={isLoading}
+              disabled={code.length < VERIFICATION_CODE_LENGTH}
             />
           ) : (
-            <RoadButton 
-              title="Send Code" 
-              onPress={handleSendCode} 
-              loading={isLoading} 
-              disabled={!phone} 
+            <RoadButton
+              title="Send Code"
+              onPress={handleSendCode}
+              loading={isLoading}
+              disabled={!phone}
             />
           )}
         </View>
 
-        <TouchableOpacity style={styles.changeNumber} onPress={() => router.back()}>
-          <Text style={styles.changeNumberText}>Back</Text>
+        <TouchableOpacity style={styles.changeNumber} onPress={handleBackOrSkip}>
+          <Text style={styles.changeNumberText}>
+            {isLinkFlow ? 'Skip for now' : 'Back'}
+          </Text>
         </TouchableOpacity>
-
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: Colors.offWhite },
-  content: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 80, alignItems: 'center' },
-  title: { fontSize: 24, fontWeight: '700', color: Colors.black, marginBottom: 12 },
-  subtitle: { fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 32, lineHeight: 20 },
-  
+  screen: {
+    flex: 1,
+    backgroundColor: Colors.offWhite,
+  },
+  content: {
+    flexGrow: 1,
+    paddingHorizontal: 24,
+    paddingTop: 80,
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: Colors.black,
+    marginBottom: 12,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 32,
+    lineHeight: 20,
+  },
+
+  phoneInputWrap: {
+    width: '100%',
+    maxWidth: 320,
+    marginBottom: 16,
+  },
+
   otpContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -227,14 +281,50 @@ const styles = StyleSheet.create({
     zIndex: 10, // Makes sure taps go to the input
   },
 
-  error: { color: Colors.errorRed, fontSize: 13, textAlign: 'center', marginBottom: 16 },
-  
-  resendWrap: { flexDirection: 'row', alignItems: 'center', marginBottom: 32 },
-  resendText: { fontSize: 14, color: Colors.black },
-  timerText: { fontSize: 14, color: '#999', fontWeight: '500' },
-  resendLink: { fontSize: 14, color: '#4285F4', fontWeight: '600' }, // Blue link
+  error: {
+    color: Colors.errorRed,
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
 
-  buttonWrap: { width: '100%', maxWidth: 320, marginBottom: 16 },
-  changeNumber: { padding: 10 },
-  changeNumberText: { color: '#666', fontSize: 14, textDecorationLine: 'underline' },
+  resendWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  resendText: {
+    fontSize: 14,
+    color: Colors.black,
+  },
+  timerText: {
+    fontSize: 14,
+    color: '#999',
+    fontWeight: '500',
+  },
+  resendLink: {
+    fontSize: 14,
+    color: '#4285F4',
+    fontWeight: '600',
+  },
+
+  changeNumberInline: {
+    marginBottom: 24,
+    padding: 6,
+  },
+  changeNumberText: {
+    color: '#4285F4',
+    fontSize: 13,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
+
+  buttonWrap: {
+    width: '100%',
+    maxWidth: 320,
+    marginBottom: 16,
+  },
+  changeNumber: {
+    padding: 10,
+  },
 });

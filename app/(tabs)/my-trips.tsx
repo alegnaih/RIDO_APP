@@ -5,7 +5,7 @@ import { useRouter } from 'expo-router';
 import { getFirestore, collection, query, where, onSnapshot } from '@react-native-firebase/firestore';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
+import { CustomNotice } from '../../src/components/ui/CustomNotice';
 import { useAuth } from '../../src/hooks/useAuth';
 import { Trip } from '../../src/types/trips';
 import { Colors } from '../../src/theme/colors';
@@ -21,7 +21,7 @@ export default function MyTripsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-
+  const [showVerifyNotice, setShowVerifyNotice] = useState(false);
   const [sections, setSections] = useState<TripSection[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSyncReady, setIsSyncReady] = useState(isTimeSynced());
@@ -57,13 +57,25 @@ export default function MyTripsScreen() {
         const trip = { id: doc.id, ...doc.data() } as Trip;
         const tripDate = trip.scheduledAt?.toDate()?.getTime() || 0;
 
+        // ✅ Calculate End Time: Start Time + Drive Duration (No buffer)
+        const durationSecs = trip.routeLegDurations?.reduce((a: number, b: number) => a + b, 0) || 0;
+        const durationMs = durationSecs * 1000;
+        const endTime = tripDate + durationMs;
+
         if (trip.status === 'active') {
           ongoing.push(trip);
         } else if (trip.status === 'completed' || trip.status === 'cancelled') {
           completed.push(trip);
         } else if (trip.status === 'planned' || !trip.status) {
-          if (tripDate < now) completed.push(trip);
-          else upcoming.push(trip);
+          
+          if (now >= endTime) {
+            completed.push(trip);
+          } else if (now >= tripDate && now < endTime) {
+            ongoing.push(trip);
+          } else {
+            upcoming.push(trip);
+          }
+
         }
       });
 
@@ -103,6 +115,10 @@ export default function MyTripsScreen() {
   };
 
   const handleCreateTrip = () => {
+    if (!user?.phone) {
+      setShowVerifyNotice(true);
+      return;
+    }
     router.push('/create-trip');
   };
 
@@ -157,6 +173,14 @@ export default function MyTripsScreen() {
           
           const canDelete = isLeader && trip.status === 'planned' && startDate.getTime() > getTrustedTime();
 
+          // ✅ Calculate End Time to know if it's truly ongoing
+          const durationSecs = trip.routeLegDurations?.reduce((a: number, b: number) => a + b, 0) || 0;
+          const endTime = startDate.getTime() + (durationSecs * 1000);
+          const now = getTrustedTime();
+          
+          // ✅ It is only Ongoing if it has started AND hasn't ended yet
+          const isOngoing = now >= startDate.getTime() && now < endTime && trip.status !== 'completed' && trip.status !== 'cancelled';
+
           return (
             <TouchableOpacity 
               style={styles.tripCard}
@@ -182,10 +206,11 @@ export default function MyTripsScreen() {
               </View>
 
                 <View style={styles.rightActions}>
-                  {trip.status === 'active' && (
+                  {/* ✅ Uses the new isOngoing variable */}
+                  {isOngoing && (
                     <View style={styles.activeBadge}>
                       <View style={styles.activeDot} />
-                      <Text style={styles.activeText}>Active</Text>
+                      <Text style={styles.activeText}>Ongoing</Text>
                     </View>
                   )}
                   
@@ -209,6 +234,18 @@ export default function MyTripsScreen() {
         }}
       />
 
+      <CustomNotice
+            isVisible={showVerifyNotice}
+            onClose={() => setShowVerifyNotice(false)}
+            title="Notice"
+            message="Please verify your phone number first before proceeding."
+            buttonText="Verify Now"
+            onButtonPress={() => {
+              setShowVerifyNotice(false);
+              router.push('/(tabs)/profile');
+            }}
+          />
+          
       <Modal visible={!!tripToDelete} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -380,11 +417,9 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 6,
   },
-
-   roleBadgeLeader: {
-    backgroundColor: Colors.greenBtn, // Darker green for leaders
+  roleBadgeLeader: {
+    backgroundColor: Colors.greenBtn,
   },
-  
   roleText: {
     fontSize: 10,
     fontWeight: '700',

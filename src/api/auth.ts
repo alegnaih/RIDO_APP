@@ -12,7 +12,8 @@ import {
   confirmPasswordReset,
   ActionCodeSettings,
   updateProfile,
-  fetchSignInMethodsForEmail, 
+  fetchSignInMethodsForEmail,
+  linkWithCredential, // ✅ NEW: links a credential to the currently signed-in user
 } from '@react-native-firebase/auth';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { getFirebaseAuth } from './firebase';
@@ -47,17 +48,27 @@ export async function registerWithEmailPassword(input: RegistrationInput): Promi
     input.password,
   );
 
-  await updateProfile(credential.user, { displayName: input.name });
-  const displayId = await generateUniqueDisplayId();
+  try {
+    await updateProfile(credential.user, { displayName: input.name });
+    const displayId = await generateUniqueDisplayId();
 
-  await saveRiderProfile(credential.user.uid, {
-    name: input.name,
-    email: input.email,
-    phone: input.phone,
-    displayId: displayId,
-  });
-  
-  return displayId; // ✅ Return it to update local state instantly
+    await saveRiderProfile(credential.user.uid, {
+      name: input.name,
+      email: input.email,
+      phone: input.phone,
+      displayId: displayId,
+    });
+
+    return displayId;
+  } catch (error) {
+    // 🔥 ROLLBACK: Permanently delete the Auth user if Firestore fails
+    try {
+      await credential.user.delete();
+    } catch (deleteError) {
+      console.error('Failed to rollback Auth user:', deleteError);
+    }
+    throw error; 
+  }
 }
 
 export async function signInWithGoogleAccount(forceLink: boolean = false): Promise<string> {
@@ -75,15 +86,15 @@ export async function signInWithGoogleAccount(forceLink: boolean = false): Promi
 
   const email = googleUser.email;
 
-  // ✅ Check if the email exists as a password account
   if (!forceLink && email) {
     try {
       const methods = await fetchSignInMethodsForEmail(getFirebaseAuth(), email);
-      if (methods.length > 0) {
+      // ✅ Safety check: methods can be null in newer Firebase versions
+      if (methods && methods.length > 0) {
         throw new Error('ACCOUNT_ALREADY_EXISTS');
       }
     } catch (e: any) {
-      if (e.message === 'ACCOUNT_ALREADY_EXISTS') throw e; 
+      if (e.message === 'ACCOUNT_ALREADY_EXISTS') throw e;
       console.warn("Could not fetch sign-in methods:", e);
     }
   }
@@ -91,23 +102,33 @@ export async function signInWithGoogleAccount(forceLink: boolean = false): Promi
   const credential = GoogleAuthProvider.credential(idToken);
   const userCredential = await signInWithCredential(getFirebaseAuth(), credential);
   const firebaseUser = userCredential.user;
-  
-  const existingProfile = await fetchRiderProfile(firebaseUser.uid);
-  let displayId = existingProfile?.displayId || '';
 
-  // ✅ If it's a brand new user, generate an ID. If it's a legacy user missing an ID, generate one too.
-  if (!existingProfile || !displayId) {
-    displayId = await generateUniqueDisplayId();
-    await saveRiderProfile(firebaseUser.uid, {
-      name: firebaseUser.displayName ?? googleUser.name ?? '',
-      email: firebaseUser.email ?? googleUser.email ?? '',
-      phone: firebaseUser.phoneNumber ?? '',
-      displayId: displayId,
-    });
+  try {
+    const existingProfile = await fetchRiderProfile(firebaseUser.uid);
+    let displayId = existingProfile?.displayId || '';
+
+    if (!existingProfile || !displayId) {
+      displayId = await generateUniqueDisplayId();
+      await saveRiderProfile(firebaseUser.uid, {
+        name: firebaseUser.displayName ?? googleUser.name ?? '',
+        email: firebaseUser.email ?? googleUser.email ?? '',
+        phone: firebaseUser.phoneNumber ?? '',
+        displayId: displayId,
+      });
+    }
+
+    return displayId;
+  } catch (error) {
+    // 🔥 ROLLBACK: Permanently delete the Auth user if Firestore fails
+    try {
+      await firebaseUser.delete();
+    } catch (deleteError) {
+      console.error('Failed to rollback Google user:', deleteError);
+    }
+    throw error;
   }
-
-  return displayId; // ✅ Return it to update local state instantly
 }
+
 
 export async function signOutGoogle(): Promise<void> {
   try {
@@ -117,25 +138,32 @@ export async function signOutGoogle(): Promise<void> {
   }
 }
 
+/**
+ * Sends the SMS OTP for a phone number.
+ * NOTE: This does NOT sign the user in — it only returns the verificationId.
+ * Safe to call while the user is already signed in (e.g. right after signup).
+ */
 export async function requestPhoneVerificationCode(phoneNumber: string): Promise<string> {
   const confirmation = await signInWithPhoneNumber(getFirebaseAuth(), phoneNumber);
   return confirmation.verificationId;
 }
 
+/**
+ * Sign-in flow (existing users logging in with phone).
+ * Signs the user in as the phone account.
+ */
 export async function confirmPhoneCode(verificationId: string, code: string, skipFirestoreSave = false): Promise<string> {
   const credential = PhoneAuthProvider.credential(verificationId, code);
   const userCredential = await signInWithCredential(getFirebaseAuth(), credential);
   const firebaseUser = userCredential.user;
 
-  if (skipFirestoreSave) 
-  {
-    return ''; 
+  if (skipFirestoreSave) {
+    return '';
   }
 
   const existingProfile = await fetchRiderProfile(firebaseUser.uid);
   let displayId = existingProfile?.displayId || '';
-  
-  // ✅ Same logic for phone users
+
   if (!existingProfile || !displayId) {
     displayId = await generateUniqueDisplayId();
     await saveRiderProfile(firebaseUser.uid, {
@@ -146,14 +174,45 @@ export async function confirmPhoneCode(verificationId: string, code: string, ski
     });
   }
 
-  return displayId; // ✅ Return it
+  return displayId;
+}
+
+/** Signup flow — links the phone credential to the CURRENTLY signed-in
+ * email/password user. Same UID, no new Firestore doc.
+ *
+ * Throws `auth/credential-already-in-use` if the phone belongs to another account,
+ * and `auth/provider-already-linked` if this account already has a phone.
+ */
+export async function linkPhoneToCurrentUser(verificationId: string, code: string, phoneNumber: string): Promise<void> {
+  const auth = getFirebaseAuth();
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error('You need to be signed in to link a phone number.');
+  }
+
+  const credential = PhoneAuthProvider.credential(verificationId, code);
+  const result = await linkWithCredential(currentUser, credential);
+  
+  await result.user.reload();
+
+  // ✅ Use the passed phoneNumber, or fallback to the result.user's phoneNumber
+  const finalPhone = result.user.phoneNumber || phoneNumber;
+
+  const existing = await fetchRiderProfile(currentUser.uid);
+  
+  await saveRiderProfile(currentUser.uid, {
+    name: existing?.name || result.user.displayName || 'RIDO User',
+    email: existing?.email || result.user.email || '',
+    phone: finalPhone, // ✅ Always saves the verified number
+    displayId: existing?.displayId || '', 
+  });
 }
 
 export async function sendPasswordResetEmail(email: string): Promise<void> {
   try {
     await firebaseSendPasswordResetEmail(getFirebaseAuth(), email);
   } catch (error) {
-    throw error; 
+    throw error;
   }
 }
 

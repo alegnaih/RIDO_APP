@@ -42,6 +42,8 @@ const AUTH_ERROR_MESSAGES: Record<string, string> = {
   'auth/code-expired': 'That code has expired. Request a new one.',
   'auth/missing-verification-code': 'Enter the verification code.',
   'auth/quota-exceeded': 'SMS quota reached. Try again later.',
+  'auth/credential-already-in-use': 'This phone number is already linked to another account.',
+  'auth/provider-already-linked': 'This account already has a phone number linked.',
 };
 
 /** Reads the `code` field Firebase attaches to its errors. */
@@ -59,19 +61,21 @@ function getErrorCode(error: unknown): string | null {
  * Maps a Firebase auth failure to a message a rider can act on.
  * Falls back to the raw message, then to the supplied default.
  */
-export function getAuthErrorMessage(error: any, fallback: string): string {
-  if (!error || !error.code) return fallback;
+export function getAuthErrorMessage(error: unknown, fallback: string): string {
+  const code = getErrorCode(error);
 
-  switch (error.code) {
-    case 'auth/email-already-in-use':
-      return 'This email is already registered. Please log in instead.';
-    case 'auth/invalid-email':
-      return 'That email address is invalid.';
-    case 'auth/weak-password':
-      return 'Your password is too weak.';
-    case 'auth/phone-number-already-exists':
-      return 'This phone number is already linked to another account.';
-    default:
-      return fallback;
+  // Check if we have a friendly message in our dictionary
+  if (code && AUTH_ERROR_MESSAGES[code]) {
+    return AUTH_ERROR_MESSAGES[code];
   }
+
+  //  If it's an unknown Firebase error, try to get the raw message
+  // (This strips the "Firebase: Error (auth/...)" wrapper if possible)
+  const rawMessage = getErrorMessage(error, fallback);
+  if (rawMessage.includes('Firebase: ')) {
+    return rawMessage.replace('Firebase: ', '').replace(/ \(auth.*\)\.?/, '');
+  }
+
+  
+  return fallback;
 }
