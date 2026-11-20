@@ -1,6 +1,6 @@
 import { ExpoConfig, ConfigContext } from 'expo/config';
 
-export default ({ config }: ConfigContext): ExpoConfig => ({
+export default ({ config }) => ({
   ...config,
   name: 'RIDO',
   slug: 'rido',
