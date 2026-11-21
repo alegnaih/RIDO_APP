@@ -122,7 +122,7 @@ export function SetLocationsSheet({
             <LocationInput
               label="Start/Meeting Point"
               value={meetingPoint?.name}
-              placeholder="e.g., Robinsons Place"
+              placeholder="e.g., Luneta Park"
               onPress={onSelectMeeting}
               onClear={onClearMeeting}
             />
@@ -165,7 +165,7 @@ export function SetLocationsSheet({
             <LocationInput
               label="Destination"
               value={endPoint?.name}
-              placeholder="e.g., Robinsons Place"
+              placeholder="e.g., Antipolo"
               onPress={onSelectDestination}
               onClear={onClearDestination}
             />

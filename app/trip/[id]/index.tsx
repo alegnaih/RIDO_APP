@@ -326,10 +326,18 @@ export default function TripDetailsScreen() {
         pathname: '/trip-left',
         params: { title: trip.title }
       });
-    } catch (error) {
-      console.error("Failed to leave trip", error);
-      setIsLeaving(false);
-    }
+      } catch (error) {
+        console.error('Failed to leave trip', error);
+
+        Alert.alert(
+          'Unable to Leave Trip',
+          error instanceof Error
+            ? error.message
+            : 'Something went wrong. Please try again.'
+        );
+      } finally {
+        setIsLeaving(false);
+      }
   };
 
   const handleContinueAsMember = () => {
