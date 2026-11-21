@@ -1,3 +1,4 @@
+// #app/_layout.tsx
 import { getAuth } from '@react-native-firebase/auth';
 import { GestureHandlerRootView } from 'react-native-gesture-handler'; 
 import { useEffect } from 'react';

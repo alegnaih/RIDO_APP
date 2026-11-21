@@ -101,11 +101,56 @@ export function useAuth() {
     [setLoading, clearError, setError],
   );
 
-  const signInWithEmail = useCallback(
-    (email: string, password: string) =>
-      runAuthAction(() => signInWithEmailPassword(email, password), 'Failed to sign in.'),
-    [runAuthAction],
-  );
+
+const signInWithEmail = useCallback(
+  async (email: string, password: string): Promise<boolean> => {
+    setLoading(true);
+    clearError();
+
+    try {
+      await signInWithEmailPassword(email, password);
+
+      // Firebase authentication succeeded.
+      // Wait for the auth listener to populate the Zustand user.
+      const userIsReady = useAuthStore.getState().isAuthenticated;
+
+      if (!userIsReady) {
+        await new Promise<void>((resolve, reject) => {
+          const timeoutId = setTimeout(() => {
+            unsubscribe();
+            reject(new Error('Timed out waiting for rider profile.'));
+          }, 10000);
+
+          const unsubscribe = useAuthStore.subscribe((state) => {
+            if (state.isAuthenticated) {
+              clearTimeout(timeoutId);
+              unsubscribe();
+              resolve();
+            }
+          });
+
+          // Recheck after subscribing to avoid missing an update.
+          if (useAuthStore.getState().isAuthenticated) {
+            clearTimeout(timeoutId);
+            unsubscribe();
+            resolve();
+          }
+        });
+      }
+
+      return true;
+    } catch (caught) {
+      setError(
+        getAuthErrorMessage(caught, 'Failed to sign in.')
+      );
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  },
+  [setLoading, clearError, setError],
+);
+
 
   const signUpWithEmail = useCallback(
     async (name: string, email: string, password: string, phone: string) => {

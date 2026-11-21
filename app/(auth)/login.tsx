@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { StyleSheet, View, Text, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/hooks/useAuth';
@@ -13,35 +13,64 @@ import { signOutGoogle } from '../../src/api/auth';
 export default function LoginScreen() {
   const router = useRouter();
   const { signInWithEmail, signInWithGoogle, signOutGoogle, error, clearError, isLoading } = useAuth();
-
+  const loginInProgress = useRef(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+  React.useEffect(() => {
+  console.log('[LOGIN SCREEN] Mounted');
+
+  return () => {
+    console.log('[LOGIN SCREEN] Unmounted');
+  };
+}, []);
 
   const clearMessages = () => {
     if (formError) setFormError(null);
     if (error) clearError();
   };
 
-  const handleLogin = async () => {
-    clearMessages();
-    const value = email.trim();
 
-    if (!value.includes('@')) {
-      setFormError('Enter a valid email address.');
-      return;
-    }
-    if (!password) {
-      setFormError('Enter your password.');
-      return;
-    }
+ const handleLogin = async () => {
+  if (loginInProgress.current || isLoading) return;
+
+  clearMessages();
+
+  const value = email.trim();
+
+  if (!value.includes('@')) {
+    setFormError('Enter a valid email address.');
+    return;
+  }
+
+  if (!password) {
+    setFormError('Enter your password.');
+    return;
+  }
+
+  loginInProgress.current = true;
+
+  try {
+    console.log('[LOGIN] Starting login attempt');
 
     const success = await signInWithEmail(value, password);
-    
+
+    console.log('[LOGIN] Authentication result:', success);
+
     if (success) {
+      console.log('[LOGIN] Authentication succeeded');
       router.replace('/(tabs)/map');
+    } else {
+      console.log('[LOGIN] Authentication did not succeed');
     }
-  };
+  } catch (err) {
+    console.error('[LOGIN] Unexpected error:', err);
+    setFormError('Something went wrong. Please try again.');
+  } finally {
+    loginInProgress.current = false;
+  }
+};
+
 
   const handleGoogle = async () => {
     clearMessages();

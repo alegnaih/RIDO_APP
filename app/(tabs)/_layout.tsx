@@ -1,3 +1,4 @@
+// app(tabs)_layout.tsx
 import { Tabs } from 'expo-router';
 import { Colors, DarkTheme } from '../../src/theme/colors';
 import { Redirect } from 'expo-router';
