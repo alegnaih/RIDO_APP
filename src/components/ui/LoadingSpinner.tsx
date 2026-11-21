@@ -5,7 +5,7 @@ import { Colors } from '../../theme/colors';
 export function LoadingSpinner() {
   return (
     <View style={styles.container}>
-      <ActivityIndicator size="large" color={Colors.accentGreen} />
+      <ActivityIndicator size="large" color={Colors.darkGreen} />
     </View>
   );
 }
@@ -15,6 +15,6 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.darkBlue,
+   // backgroundColor: 
   },
 });

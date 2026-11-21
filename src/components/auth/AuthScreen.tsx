@@ -45,7 +45,7 @@ export function AuthScreen({ title, subtitle, error, children }: AuthScreenProps
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: Colors.darkBlue,
+    backgroundColor: Colors.darkGreen,
   },
   flex: {
     flex: 1,

@@ -193,21 +193,57 @@ const signInWithEmail = useCallback(
     [setLoading, clearError, setError, updateUser],
   );
 
-  const requestPhoneCode = useCallback(
-    async (phoneNumber: string): Promise<string | null> => {
-      setLoading(true);
-      clearError();
-      try {
-        return await requestPhoneVerificationCode(phoneNumber);
-      } catch (caught) {
-        setError(getAuthErrorMessage(caught, 'Could not send the verification code.'));
-        return null;
-      } finally {
-        setLoading(false);
+
+const requestPhoneCode = useCallback(
+  async (phoneNumber: string): Promise<string | null> => {
+    setLoading(true);
+    clearError();
+
+    try {
+      console.log('[PHONE AUTH] Request started');
+
+      const verificationId =
+        await requestPhoneVerificationCode(phoneNumber);
+
+      console.log('[PHONE AUTH] Verification request succeeded');
+
+      return verificationId;
+    } catch (caught: unknown) {
+      const firebaseError = caught as {
+        code?: string;
+        message?: string;
+        nativeErrorCode?: string | number;
+        nativeErrorMessage?: string;
+      };
+
+      console.error('[PHONE AUTH] FAILED', {
+        code: firebaseError?.code ?? 'UNKNOWN',
+        nativeErrorCode: firebaseError?.nativeErrorCode ?? null,
+      });
+
+      // For local development only.
+      // Do not expose raw Firebase errors in production UI.
+      if (__DEV__) {
+        setError(
+          `Firebase error: ${firebaseError?.code ?? 'UNKNOWN'}\n` +
+          `${firebaseError?.message ?? 'No error message available'}`
+        );
+      } else {
+        setError(
+          getAuthErrorMessage(
+            caught,
+            'Could not send the verification code.'
+          )
+        );
       }
-    },
-    [setLoading, clearError, setError],
-  );
+
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  },
+  [setLoading, clearError, setError],
+);
 
   const confirmPhoneCode = useCallback(
     async (verificationId: string, code: string, skipFirestoreSave = false) => {

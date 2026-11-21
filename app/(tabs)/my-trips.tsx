@@ -251,7 +251,7 @@ export default function MyTripsScreen() {
           <View style={styles.modalContent}>
             <MaterialCommunityIcons name="delete-outline" size={40} color={Colors.darkGreen} style={{ marginBottom: 12 }} />
             
-            <Text style={styles.modalTitle}>Are you sure you want to leave this trip?</Text>
+            <Text style={styles.modalTitle}>Are you sure you want to delete and cancel this trip?</Text>
             <Text style={styles.modalSubtitle}>
               You cannot recover this, and all members will be notified that you have cancelled this trip.
             </Text>

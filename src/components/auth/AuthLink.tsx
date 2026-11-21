@@ -30,7 +30,7 @@ const styles = StyleSheet.create({
     minHeight: 48,
   },
   label: {
-    color: Colors.accentGreen,
+    color: Colors.darkGreen,
     fontSize: 15,
     fontWeight: '600',
     textAlign: 'center',

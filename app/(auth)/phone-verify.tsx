@@ -33,7 +33,7 @@ export default function PhoneVerifyScreen() {
   useEffect(() => {
     if (paramPhone && !hasAutoSentRef.current) {
       hasAutoSentRef.current = true;
-      handleSendCode();
+      handleSendCode(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paramPhone]);
@@ -46,23 +46,31 @@ export default function PhoneVerifyScreen() {
     }
   }, [isCodeStep, timer]);
 
-  const handleSendCode = async () => {
-    if (!isValidPhoneNumber(phone)) {
-      setFormError('Enter a valid mobile number, for example 09171234567.');
-      return;
-    }
+const handleSendCode = async (isResend = false) => {
+  if (isLoading) return;
 
-    setFormError(null);
-    if (error) clearError();
+  if (isResend && timer > 0) return;
 
-    const id = await requestPhoneCode(normalizePhoneNumber(phone));
-    if (id) {
-      setVerificationId(id);
-      setIsCodeStep(true);
-      setTimer(60);
+  if (!isValidPhoneNumber(phone)) {
+    setFormError('Enter a valid mobile number, for example 09171234567.');
+    return;
+  }
+
+  setFormError(null);
+  if (error) clearError();
+
+  const id = await requestPhoneCode(normalizePhoneNumber(phone));
+
+  if (id) {
+    setVerificationId(id);
+    setIsCodeStep(true);
+    setTimer(60);
+
+    if (!isResend) {
       setCode('');
     }
-  };
+  }
+};
 
   const handleVerifyCode = async () => {
     if (!verificationId) {
@@ -176,7 +184,7 @@ export default function PhoneVerifyScreen() {
             {timer > 0 ? (
               <Text style={styles.timerText}> Resend code ({timer}s)</Text>
             ) : (
-              <TouchableOpacity onPress={handleSendCode} disabled={isLoading}>
+              <TouchableOpacity onPress={() => handleSendCode(true)} disabled={isLoading}>
                 <Text style={styles.resendLink}> Resend code</Text>
               </TouchableOpacity>
             )}
@@ -201,7 +209,7 @@ export default function PhoneVerifyScreen() {
           ) : (
             <RoadButton
               title="Send Code"
-              onPress={handleSendCode}
+              onPress={() => handleSendCode(false)}
               loading={isLoading}
               disabled={!phone}
             />
