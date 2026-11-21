@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { View, StyleSheet, TextInput, TouchableOpacity, Text, FlatList, Platform, Keyboard, Alert } from 'react-native';
+import { View, StyleSheet, TextInput, TouchableOpacity, Text, FlatList, 
+  Platform, Keyboard, Alert, useWindowDimensions } from 'react-native';
 import MapboxGL from '@rnmapbox/maps';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,6 +22,39 @@ interface CreateTripScreenProps {
 
 export function CreateTripScreen({ onClose }: CreateTripScreenProps) {
   const insets = useSafeAreaInsets();
+  
+  const { height: screenHeight } = useWindowDimensions();
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios'
+      ? 'keyboardWillShow'
+      : 'keyboardDidShow';
+
+    const hideEvent = Platform.OS === 'ios'
+      ? 'keyboardWillHide'
+      : 'keyboardDidHide';
+
+    const showSubscription = Keyboard.addListener(
+      showEvent,
+      (event) => {
+        setKeyboardHeight(event.endCoordinates.height);
+      }
+    );
+
+    const hideSubscription = Keyboard.addListener(
+      hideEvent,
+      () => {
+        setKeyboardHeight(0);
+      }
+    );
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
   const cameraRef = useRef<MapboxGL.Camera>(null);
   const router = useRouter();
   const { mode } = useLocalSearchParams<{ mode?: string }>();
@@ -257,7 +291,16 @@ export function CreateTripScreen({ onClose }: CreateTripScreenProps) {
       </View>
 
       {/* Bottom Sheets */}
-      <View style={styles.sheetContainer} pointerEvents='box-none'>
+{/* Bottom Sheets */}
+      <View style={[
+          styles.sheetContainer,
+          {
+            bottom: keyboardHeight,
+            maxHeight: keyboardHeight > 0
+              ? Math.max(180, screenHeight - keyboardHeight - insets.top - 20)
+              : screenHeight * 0.5,
+          },
+        ]} pointerEvents="box-none">
         {trip.sheetMode === 'details' ? (
           <TripDetailsSheet
             title={trip.title}
@@ -372,7 +415,6 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     zIndex: 2,
-    maxHeight: '50%',
     justifyContent: 'flex-end',
   },
   marker: {

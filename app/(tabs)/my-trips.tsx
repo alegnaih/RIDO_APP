@@ -1,6 +1,7 @@
 // app/(tabs)/my-trips.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, SectionList, Modal } from 'react-native';
+import Swipeable, {type SwipeableMethods,} from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { useRouter } from 'expo-router';
 import { getFirestore, collection, query, where, onSnapshot } from '@react-native-firebase/firestore';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -28,6 +29,27 @@ export default function MyTripsScreen() {
 
   const [tripToDelete, setTripToDelete] = useState<Trip | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  const swipeableRefs = useRef<
+    Record<string, React.RefObject<SwipeableMethods | null>>
+  >({});
+
+  const getSwipeableRef = (tripId: string) => {
+    if (!swipeableRefs.current[tripId]) {
+      swipeableRefs.current[tripId] =
+        React.createRef<SwipeableMethods>();
+    }
+
+    return swipeableRefs.current[tripId];
+  };
+
+  const handleSwipeOpen = (tripId: string) => {
+    Object.entries(swipeableRefs.current).forEach(([id, swipeableRef]) => {
+      if (id !== tripId) {
+        swipeableRef.current?.close();
+      }
+    });
+};
 
   useEffect(() => {
     if (isSyncReady) return;
@@ -181,11 +203,16 @@ export default function MyTripsScreen() {
           // ✅ It is only Ongoing if it has started AND hasn't ended yet
           const isOngoing = now >= startDate.getTime() && now < endTime && trip.status !== 'completed' && trip.status !== 'cancelled';
 
-          return (
-            <TouchableOpacity 
-              style={styles.tripCard}
+
+          const tripCard = (
+            <TouchableOpacity
+              style={[
+                styles.tripCard,
+                canDelete && styles.swipeTripCard,
+              ]}
               onPress={() => router.push(`/trip/${trip.id}`)}
-            >
+              activeOpacity={0.8}>
+
               <View style={styles.cardHeader}>
                 <Text style={styles.tripTitle}>{trip.title}</Text>
                 <Text style={styles.codeText}>#{trip.shareCode}</Text>
@@ -214,24 +241,46 @@ export default function MyTripsScreen() {
                     </View>
                   )}
                   
-                  {canDelete && (
-                    <TouchableOpacity 
-                      style={styles.deleteBtn}
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        setTripToDelete(trip);
-                      }}
-                    >
-                      <Feather name="trash-2" size={18} color={Colors.errorRed} />
-                    </TouchableOpacity>
-                  )}
 
                   <Feather name="chevron-right" size={20} color="#999" />
                 </View>
               </View>
-            </TouchableOpacity>
-          );
+          </TouchableOpacity>
+        );
+
+        if (!canDelete) {
+          return tripCard;
+        }
+
+        return (
+          <Swipeable
+            ref={getSwipeableRef(trip.id)}
+            friction={2}
+            rightThreshold={40}
+            overshootRight={false}
+            containerStyle={styles.swipeableContainer}
+            onSwipeableWillOpen={() => handleSwipeOpen(trip.id)}
+            renderRightActions={() => (
+              <TouchableOpacity
+                style={styles.swipeDeleteAction}
+                activeOpacity={0.8}
+                onPress={() => {
+                  swipeableRefs.current[trip.id]?.current?.close();
+                  setTripToDelete(trip);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`Delete trip ${trip.title}`}
+              >
+                <Feather name="trash-2" size={22} color="#FFF" />
+                <Text style={styles.swipeDeleteText}>Delete</Text>
+              </TouchableOpacity>
+            )}
+          >
+            {tripCard}
+          </Swipeable>
+        );
         }}
+
       />
 
       <CustomNotice
@@ -453,6 +502,7 @@ const styles = StyleSheet.create({
   },
   deleteBtn: {
     opacity: 0.5,
+    marginRight: 10,
   },
   modalOverlay: {
     flex: 1,
@@ -511,4 +561,28 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFF',
   },
+
+swipeableContainer: {
+  marginBottom: 12,
+  borderRadius: 16,
+},
+
+swipeTripCard: {
+  marginBottom: 0,
+},
+
+swipeDeleteAction: {
+  width: 88,
+  backgroundColor: Colors.errorRed,
+  justifyContent: 'center',
+  alignItems: 'center',
+  gap: 6,
+},
+
+swipeDeleteText: {
+  color: '#FFF',
+  fontSize: 12,
+  fontWeight: '700',
+},
+
 });

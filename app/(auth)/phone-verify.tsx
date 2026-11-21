@@ -16,7 +16,7 @@ export default function PhoneVerifyScreen() {
   const { phone: paramPhone, flow } = useLocalSearchParams<{ phone?: string; flow?: string }>();
  const isLinkFlow = flow === 'signup' || flow === 'link' || flow === 'profile';
 
-  const { requestPhoneCode, confirmPhoneCode, linkPhone, error, clearError, isLoading } = useAuth();
+  const { requestPhoneCode, requestLinkPhoneCode, confirmPhoneCode, linkPhone, error, clearError, isLoading } = useAuth();
 
   const [isCodeStep, setIsCodeStep] = useState(false);
   const [phone, setPhone] = useState(paramPhone ? normalizePhoneNumber(paramPhone) : '');
@@ -59,8 +59,12 @@ const handleSendCode = async (isResend = false) => {
   setFormError(null);
   if (error) clearError();
 
-  const id = await requestPhoneCode(normalizePhoneNumber(phone));
+const normalizedPhone = normalizePhoneNumber(phone);
 
+const id = isLinkFlow
+  ? await requestLinkPhoneCode(normalizedPhone)
+  : await requestPhoneCode(normalizedPhone);
+  
   if (id) {
     setVerificationId(id);
     setIsCodeStep(true);

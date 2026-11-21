@@ -1,6 +1,6 @@
 // src/api/profile.ts
 import { doc, getDoc, setDoc } from '@react-native-firebase/firestore';
-import { getFirebaseFirestore } from './firebase';
+import { getFirebaseFirestore, getFirebaseAuth } from './firebase';
 import { RiderProfile, UserRole } from '../types';
 
 const USERS_COLLECTION = 'users';
@@ -45,8 +45,10 @@ export async function fetchRiderProfile(uid: string): Promise<RiderProfile | nul
     uid,
     name: asString(stored.name),
     email: asString(stored.email),
-    phone: asString(stored.phone),
-    displayId: asString(stored.displayId), // ✅ Now TypeScript knows this exists
+    phone:
+      getFirebaseAuth().currentUser?.uid === uid
+        ? (getFirebaseAuth().currentUser?.phoneNumber ?? '')
+        : '',    displayId: asString(stored.displayId), 
     role: asRole(stored.role),
     isOnline: true,
     lastSeen: Date.now(),

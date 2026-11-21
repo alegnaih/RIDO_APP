@@ -13,7 +13,8 @@ import {
   ActionCodeSettings,
   updateProfile,
   fetchSignInMethodsForEmail,
-  linkWithCredential, // ✅ NEW: links a credential to the currently signed-in user
+  linkWithCredential, 
+  verifyPhoneNumber
 } from '@react-native-firebase/auth';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { getFirebaseAuth } from './firebase';
@@ -55,7 +56,7 @@ export async function registerWithEmailPassword(input: RegistrationInput): Promi
     await saveRiderProfile(credential.user.uid, {
       name: input.name,
       email: input.email,
-      phone: input.phone,
+      phone: '',
       displayId: displayId,
     });
 
@@ -148,6 +149,91 @@ export async function requestPhoneVerificationCode(phoneNumber: string): Promise
   return confirmation.verificationId;
 }
 
+
+/**
+ * Request an OTP for linking a phone number
+ * to an existing Firebase account.
+ *
+ * This does NOT sign in as a phone user.
+ */
+export async function requestPhoneLinkCode(
+  phoneNumber: string
+): Promise<string> {
+  const auth = getFirebaseAuth();
+
+  if (!auth.currentUser) {
+    throw new Error(
+      'You must be signed in before linking a phone number.'
+    );
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    let settled = false;
+
+    const finish = (id?: string, error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+
+      if (error) {
+        reject(error);
+      } else if (id) {
+        resolve(id);
+      } else {
+        reject(new Error('Missing phone verification ID.'));
+      }
+    };
+
+    const timeoutId = setTimeout(() => {
+      finish(
+        undefined,
+        new Error('Timed out requesting phone verification.')
+      );
+    }, 90000);
+
+    try {
+      verifyPhoneNumber(auth, phoneNumber).on(
+        'state_changed',
+        (snapshot) => {
+          switch (snapshot.state) {
+            case 'sent':
+            case 'verified':
+            case 'timeout':
+              if (snapshot.verificationId) {
+                finish(snapshot.verificationId);
+              }
+              break;
+
+            case 'error':
+              finish(
+                undefined,
+                snapshot.error ??
+                  new Error('Phone verification failed.')
+              );
+              break;
+          }
+        },
+        (error) => {
+          finish(
+            undefined,
+            Object.assign(
+              new Error(error.message ?? 'Phone verification failed.'),
+              { code: error.code }
+            )
+          );
+        }
+      );
+    } catch (error) {
+      finish(
+        undefined,
+        error instanceof Error
+          ? error
+          : new Error('Phone verification failed.')
+      );
+    }
+  });
+}
+
 /**
  * Sign-in flow (existing users logging in with phone).
  * Signs the user in as the phone account.
@@ -183,30 +269,81 @@ export async function confirmPhoneCode(verificationId: string, code: string, ski
  * Throws `auth/credential-already-in-use` if the phone belongs to another account,
  * and `auth/provider-already-linked` if this account already has a phone.
  */
-export async function linkPhoneToCurrentUser(verificationId: string, code: string, phoneNumber: string): Promise<void> {
+
+export async function linkPhoneToCurrentUser(
+  verificationId: string,
+  code: string,
+  phoneNumber: string
+): Promise<void> {
   const auth = getFirebaseAuth();
   const currentUser = auth.currentUser;
+
   if (!currentUser) {
-    throw new Error('You need to be signed in to link a phone number.');
+    throw new Error(
+      'You need to be signed in to link a phone number.'
+    );
   }
 
-  const credential = PhoneAuthProvider.credential(verificationId, code);
-  const result = await linkWithCredential(currentUser, credential);
-  
+  const originalUid = currentUser.uid;
+
+  // Ensure we are not trying to link a different number.
+  const expectedPhone = phoneNumber;
+
+  const credential = PhoneAuthProvider.credential(
+    verificationId,
+    code
+  );
+
+  // Links the verified phone credential to the existing user.
+  const result = await linkWithCredential(
+    currentUser,
+    credential
+  );
+
+  if (result.user.uid !== originalUid) {
+    throw new Error(
+      'Account identity changed during phone verification.'
+    );
+  }
+
   await result.user.reload();
 
-  // ✅ Use the passed phoneNumber, or fallback to the result.user's phoneNumber
-  const finalPhone = result.user.phoneNumber || phoneNumber;
+  const verifiedPhone =
+    auth.currentUser?.phoneNumber ??
+    result.user.phoneNumber;
 
-  const existing = await fetchRiderProfile(currentUser.uid);
-  
-  await saveRiderProfile(currentUser.uid, {
-    name: existing?.name || result.user.displayName || 'RIDO User',
-    email: existing?.email || result.user.email || '',
-    phone: finalPhone, // ✅ Always saves the verified number
-    displayId: existing?.displayId || '', 
+  if (!verifiedPhone) {
+    throw new Error(
+      'Firebase did not return a verified phone number.'
+    );
+  }
+
+  if (verifiedPhone !== expectedPhone) {
+    throw new Error(
+      'The verified phone number does not match the requested number.'
+    );
+  }
+
+  const existing = await fetchRiderProfile(originalUid);
+
+  await saveRiderProfile(originalUid, {
+    name:
+      existing?.name ||
+      result.user.displayName ||
+      'RIDO User',
+    email:
+      existing?.email ||
+      result.user.email ||
+      '',
+    phone: verifiedPhone,
+    displayId: existing?.displayId || '',
   });
+
+  console.log(
+    '[PHONE LINK] Verified phone linked to existing UID'
+  );
 }
+
 
 export async function sendPasswordResetEmail(email: string): Promise<void> {
   try {

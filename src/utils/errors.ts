@@ -33,7 +33,7 @@ const AUTH_ERROR_MESSAGES: Record<string, string> = {
   'auth/email-already-in-use': 'An account already exists with that email.',
   'auth/weak-password': 'Choose a password with at least 6 characters.',
   'auth/user-disabled': 'This account has been disabled.',
-  'auth/too-many-requests': 'Too many attempts. Try again in a few minutes.',
+  'auth/too-many-requests': 'Too many  verification attempts. Please try again later',
   'auth/network-request-failed': 'Network error. Check your connection and try again.',
   'auth/operation-not-allowed': 'This sign-in method is not enabled for the app yet.',
   'auth/invalid-phone-number': 'That phone number is not valid.',

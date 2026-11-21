@@ -8,16 +8,12 @@ import { Colors } from '../../src/theme/colors';
 export default function SettingsScreen() 
 {
   const router = useRouter();
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
 
   // Fallbacks in case the user data isn't fully loaded
   const userName = user?.name || 'RIDO User';
-  const userRole = user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : 'Member';
-  const convoyName = 'Sons of Luzon Pilipinas'; // Hardcoded for now, can be replaced with user data later
-  const handleSignOut = async () => {
-    await signOut();
-    router.replace('/(auth)/login');
-  };
+
+
   return (   
   <ScrollView contentContainerStyle={styles.content}>
  
@@ -89,7 +85,7 @@ export default function SettingsScreen()
 
     </View>
 
-      <TouchableOpacity style={styles.logoutButton} onPress={handleSignOut}>
+      <TouchableOpacity style={styles.logoutButton} onPress={() => router.push('/settings/logout-confirm')}>
         <Feather name="log-out" size={18} color={Colors.errorRed} style={styles.menuIcon} />
         <Text style={styles.logoutText}>Log Out</Text>
       </TouchableOpacity>

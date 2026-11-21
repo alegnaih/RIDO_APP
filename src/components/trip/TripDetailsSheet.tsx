@@ -1,6 +1,6 @@
 // src/components/trip/TripDetailsSheet.tsx
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Platform, ScrollView } from 'react-native';
 import { Colors } from '../../theme/colors';
 import { Feather } from '@expo/vector-icons';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
@@ -57,7 +57,12 @@ export function TripDetailsSheet({
   };
 
   return (
-    <View style={styles.sheet}>
+    <ScrollView
+      style={styles.sheet}
+      contentContainerStyle={styles.sheetContent}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+      nestedScrollEnabled>
       <View style={styles.header}>
         <Text style={styles.title}>Create Trip</Text>
 
@@ -136,7 +141,7 @@ export function TripDetailsSheet({
       <TouchableOpacity style={styles.primaryBtn} onPress={onNext}>
         <Text style={styles.primaryBtnText}>Set Locations</Text>
       </TouchableOpacity>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -145,10 +150,11 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.offWhite,
     borderTopLeftRadius: 30,
     borderTopRightRadius: 30,
+    flexShrink:1,
+  },
+  sheetContent: {
     padding: 20,
     paddingBottom: 36,
-    overflow: 'hidden',
-    position: 'relative',
   },
   innerShadow: {
     position: 'absolute',

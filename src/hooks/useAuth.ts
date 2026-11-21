@@ -13,6 +13,7 @@ import {
   signOutOfAllProviders,
   sendPasswordResetEmail,
   signOutGoogle,
+  requestPhoneLinkCode
 } from '../api/auth';
 import { useAuthStore } from '../store/authStore';
 import { getAuthErrorMessage } from '../utils/errors';
@@ -245,6 +246,43 @@ const requestPhoneCode = useCallback(
   [setLoading, clearError, setError],
 );
 
+
+const requestLinkPhoneCode = useCallback(
+  async (phoneNumber: string): Promise<string | null> => {
+    setLoading(true);
+    clearError();
+
+    try {
+      return await requestPhoneLinkCode(phoneNumber);
+    } catch (caught: unknown) {
+      const firebaseError = caught as {
+        code?: string;
+        message?: string;
+      };
+
+      if (__DEV__) {
+        console.error('[PHONE LINK]', {
+          code: firebaseError?.code ?? 'UNKNOWN',
+          message: firebaseError?.message ?? 'Unknown error',
+        });
+      }
+
+      setError(
+        getAuthErrorMessage(
+          caught,
+          'Could not send the verification code.'
+        )
+      );
+
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  },
+  [setLoading, clearError, setError],
+);
+
+
   const confirmPhoneCode = useCallback(
     async (verificationId: string, code: string, skipFirestoreSave = false) => {
       setLoading(true);
@@ -265,7 +303,7 @@ const requestPhoneCode = useCallback(
     [updateUser, setLoading, clearError, setError],
   );
 
-  // ✅ NEW: links phone to the currently signed-in user (signup flow)
+  //NEW: links phone to the currently signed-in user (signup flow)
   const linkPhone = useCallback(
     async (verificationId: string, code: string, phoneNumber: string): Promise<boolean> => {
       setLoading(true);
@@ -302,16 +340,22 @@ const requestPhoneCode = useCallback(
     [runAuthAction],
   );
 
-  const signOut = useCallback(async () => {
+
+  const signOut = useCallback(async (): Promise<boolean> => {
     setLoading(true);
     try {
       await signOutOfAllProviders();
       reset();
+      return true;
     } catch (caught) {
-      setError(getAuthErrorMessage(caught, 'Could not sign out. Try again.'));
+      setError(
+        getAuthErrorMessage(caught, 'Could not sign out. Try again.')
+      );
       setLoading(false);
+      return false;
     }
   }, [reset, setLoading, setError]);
+
 
   return {
     user,
@@ -323,8 +367,9 @@ const requestPhoneCode = useCallback(
     signUpWithEmail,
     signInWithGoogle,
     requestPhoneCode,
+    requestLinkPhoneCode,
     confirmPhoneCode,
-    linkPhone, // ✅ NEW
+    linkPhone, 
     requestPasswordReset,
     signOut,
     clearError,

@@ -52,6 +52,8 @@ export default function RootLayout() {
           <Stack.Screen name="(tabs)" />
 
           <Stack.Screen name="settings/index" />
+          <Stack.Screen name="settings/logout-confirm" 
+          options={{headerShown: false, animation: 'slide_from_right'}} />
           <Stack.Screen name="create-trip" 
             options={{presentation: 'fullScreenModal',animation: 'slide_from_bottom' }} 
           />

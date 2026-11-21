@@ -1,6 +1,7 @@
 // src/components/trip/JoinTripModal.tsx
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, 
+  ActivityIndicator,KeyboardAvoidingView, ScrollView, Platform } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../../theme/colors';
 import { joinTripByCode } from '../../services/tripService';
@@ -52,9 +53,19 @@ export function JoinTripModal({ visible, onClose, onSuccess }: Props) {
   return (
     <>
       {/* 1. The Main Join Modal */}
-      <Modal visible={visible && !errorMessage} transparent animationType="fade">
-        <View style={styles.overlay}>
-          <View style={styles.modalContainer}>
+    {/* 1. The Main Join Modal */}
+      <Modal
+        visible={visible && !errorMessage}
+        transparent
+        animationType="fade">
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <ScrollView
+            contentContainerStyle={styles.overlay}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}>
+            <View style={styles.modalContainer}>
             <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
               <Feather name="x" size={24} color={Colors.muted} />
             </TouchableOpacity>
@@ -84,7 +95,8 @@ export function JoinTripModal({ visible, onClose, onSuccess }: Props) {
               )}
             </TouchableOpacity>
           </View>
-        </View>
+        </ScrollView>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ✅ 2. The Styled Error Popup Modal */}
@@ -114,6 +126,7 @@ export function JoinTripModal({ visible, onClose, onSuccess }: Props) {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
+    flexGrow:1,
     backgroundColor: 'rgba(0,0,0,0.6)',
     justifyContent: 'center',
     alignItems: 'center'

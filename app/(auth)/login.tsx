@@ -17,13 +17,6 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
-  React.useEffect(() => {
-  console.log('[LOGIN SCREEN] Mounted');
-
-  return () => {
-    console.log('[LOGIN SCREEN] Unmounted');
-  };
-}, []);
 
   const clearMessages = () => {
     if (formError) setFormError(null);
