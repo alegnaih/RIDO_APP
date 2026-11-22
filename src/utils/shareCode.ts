@@ -1,5 +1,5 @@
 // src/utils/shareCode.ts
-export function generateShareCode(length = 7): string {
+export function generateShareCode(length = 6): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
   for (let i = 0; i < length; i++) {

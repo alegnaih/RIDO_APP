@@ -126,10 +126,7 @@ export default function ForgotPasswordScreen() {
           <Text style={styles.backToLoginText}>Back to Log In</Text>
         </TouchableOpacity>
 
-        {/* Bottom Background Image */}
-        <View style={styles.bgWrap}>
-          <Image style={styles.bgImage} source={require('../../assets/bottom-bg.png')} resizeMode="cover" />
-        </View>
+
       </ScrollView>
     </KeyboardAvoidingView>
   );

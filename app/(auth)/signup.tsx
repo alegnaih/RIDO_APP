@@ -1,7 +1,7 @@
 // app/(auth)/signup.tsx
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { StyleSheet, View, Text, Image, KeyboardAvoidingView, Platform, ScrollView, TouchableOpacity, Alert } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useAuthDraftStore } from '../../src/store/useAuthDraftStore';
 import { AuthTextField } from '../../src/components/auth/AuthTextField';
@@ -20,6 +20,13 @@ export default function SignupScreen() {
 
   const draft = useAuthDraftStore();
   const [formError, setFormError] = useState<string | null>(null);
+
+      useFocusEffect(
+        useCallback(() => {
+          clearError();
+          setFormError(null);
+        }, [clearError])
+      );
 
   const clearMessages = () => {
     if (formError) setFormError(null);

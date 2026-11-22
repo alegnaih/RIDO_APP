@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { StyleSheet, View, Text, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useAuth } from '../../src/hooks/useAuth';
 import { AuthTextField } from '../../src/components/auth/AuthTextField';
 import { AuthDivider } from '../../src/components/auth/AuthDivider';
@@ -17,6 +17,14 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+
+    useFocusEffect(
+      useCallback(() => {
+        clearError();
+        setFormError(null);
+      }, [clearError])
+    );
+
 
   const clearMessages = () => {
     if (formError) setFormError(null);

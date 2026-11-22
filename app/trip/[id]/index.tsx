@@ -390,30 +390,59 @@ export default function TripDetailsScreen() {
         />
 
         {/* Ride Details */}
-        <View style={styles.detailsHeader}>
-          {isEditingDetails ? (
-            <TextInput
-              style={[styles.title, { borderBottomWidth: 1, borderColor: Colors.greenBtn, paddingBottom: 4, flex: 1 }]}
-              value={editTitle}
-              onChangeText={setEditTitle}
-            />
-          ) : (
-            <Text style={styles.title}>{trip.title}</Text>
-          )}
-          
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-            <TouchableOpacity style={styles.codeBadge} onPress={() => Clipboard.setStringAsync(trip.shareCode)}>
-              <Text style={styles.codeText}>#{trip.shareCode}</Text>
-              <Feather name="copy" size={14} color={Colors.greenBtn} style={{ marginLeft: 6 }} />
-            </TouchableOpacity>
 
-            {canEdit && (
-              <TouchableOpacity onPress={() => isEditingDetails ? saveDetails() : setIsEditingDetails(true)}>
-                <Text style={styles.editText}>{isEditingDetails ? 'Save' : 'Edit'}</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
+{/* Ride Details */}
+<View style={styles.detailsHeader}>
+  {/* Trip Title */}
+  {isEditingDetails ? (
+    <TextInput
+      style={[styles.title, styles.titleInput]}
+      value={editTitle}
+      onChangeText={setEditTitle}
+      multiline
+    />
+  ) : (
+    <Text style={styles.title}>
+      {trip.title}
+    </Text>
+  )}
+
+  {/* Trip Code and Edit Button */}
+  <View style={styles.tripActionsRow}>
+    <TouchableOpacity
+      style={styles.codeBadge}
+      onPress={() => Clipboard.setStringAsync(trip.shareCode)}
+      activeOpacity={0.7}
+    >
+      <Text style={styles.codeText}>
+        #{trip.shareCode}
+      </Text>
+
+      <Feather
+        name="copy"
+        size={14}
+        color={Colors.greenBtn}
+        style={{ marginLeft: 6 }}
+      />
+    </TouchableOpacity>
+
+    {canEdit && (
+      <TouchableOpacity
+        style={styles.editButton}
+        onPress={() =>
+          isEditingDetails
+            ? saveDetails()
+            : setIsEditingDetails(true)
+        }
+      >
+        <Text style={styles.editText}>
+          {isEditingDetails ? 'Save' : 'Edit'}
+        </Text>
+      </TouchableOpacity>
+    )}
+  </View>
+</View>
+
         
         <Text style={styles.subText}><Feather name="user" size={14} /> Hosted by {isLeader ? 'You' : leaderName}</Text>
         
@@ -860,19 +889,46 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.muted,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: Colors.black,
-  },
-  codeBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.greenBg,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
+
+title: {
+  fontSize: 24,
+  fontWeight: '700',
+  color: Colors.black,
+  flexShrink: 1,
+},
+
+titleInput: {
+  borderBottomWidth: 1,
+  borderColor: Colors.greenBtn,
+  paddingBottom: 4,
+  minHeight: 40,
+},
+
+tripActionsRow: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  flexWrap: 'wrap',
+  gap: 10,
+  marginTop: 10,
+},
+
+editButton: {
+  paddingHorizontal: 12,
+  paddingVertical: 8,
+  minHeight: 40,
+  justifyContent: 'center',
+},
+codeBadge: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  alignSelf: 'flex-start',
+  backgroundColor: Colors.greenBg,
+  paddingHorizontal: 12,
+  paddingVertical: 6,
+  borderRadius: 20,
+  maxWidth: '100%',
+},
   codeText: {
     fontSize: 14,
     fontWeight: '700',
@@ -922,12 +978,11 @@ const styles = StyleSheet.create({
     color: Colors.greenBtn,
     fontWeight: '600',
   },
-  detailsHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 20,
-  },
+detailsHeader: {
+  flexDirection: 'column',
+  alignItems: 'stretch',
+  marginBottom: 8,
+},
   editText: {
     color: Colors.greenBtn,
     fontSize: 14,
@@ -1218,19 +1273,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: Colors.black,
+    textAlign: 'center',
+    flexShrink: 1,
   },
   modalConfirmBtn: {
     flex: 1,
     paddingVertical: 12,
+    paddingHorizontal: 10,
+    minHeight: 48,
     borderRadius: 20,
-    backgroundColor: Colors.greenBtn,
+    borderWidth: 1,
+    borderColor: Colors.muted,
     alignItems: 'center',
     justifyContent: 'center',
   },
   modalConfirmText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#FFF',
+    color: Colors.black,
   },
   bottomSheetOverlay: {
     flex: 1,

@@ -315,7 +315,6 @@ const isEditing = !!draft.editingTripId;
                 </Text>
               </View>
             ))}
-            <Text style={styles.tapToManage}>Tap to manage a member</Text>
           </>
         )}
 
