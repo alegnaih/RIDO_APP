@@ -4,6 +4,7 @@ import { Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LocationPoint, Stopover } from '../types/trips';
 import { useTripDraftStore } from '../store/useTripDraftStore';
+import { MAX_TRIP_STOPOVERS } from '../constants/tripLimits';
 
 export type SheetMode = 'details' | 'locations';
 
@@ -52,14 +53,30 @@ export function useCreateTrip(initialMode: SheetMode = 'details') {
     setSheetMode('locations');
   };
 
+
   const addEmptyStopover = () => {
+    if (stopovers.length >= MAX_TRIP_STOPOVERS) {
+      Alert.alert(
+        'Maximum Stopovers Reached',
+        'A trip can only have a maximum of 5 stopovers.'
+      );
+      return;
+    }
+
     const newIndex = stopovers.length;
+
     setStopovers((prev) => [
-      ...prev, 
-      { name: '', location: { latitude: 0, longitude: 0 }, order: newIndex, isFromSearch: false }
+      ...prev,
+      {
+        name: '',
+        location: { latitude: 0, longitude: 0 },
+        order: newIndex,
+        isFromSearch: false,
+      },
     ]);
+
     setActiveField('stopover');
-    setActiveStopoverIndex(newIndex); 
+    setActiveStopoverIndex(newIndex);
   };
 
   const updateStopover = (point: LocationPoint) => {
@@ -79,7 +96,18 @@ export function useCreateTrip(initialMode: SheetMode = 'details') {
   };
 
   const addStopover = (point: LocationPoint) => {
-    setStopovers((prev) => [...prev, { ...point, order: prev.length }]);
+    if (stopovers.length >= MAX_TRIP_STOPOVERS) {
+      Alert.alert(
+        'Maximum Stopovers Reached',
+        'A trip can only have a maximum of 5 stopovers.'
+      );
+      return;
+    }
+
+    setStopovers((prev) => [
+      ...prev,
+      { ...point, order: prev.length },
+    ]);
   };
 
   const removeStopover = (index: number) => {

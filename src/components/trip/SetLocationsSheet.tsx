@@ -9,7 +9,7 @@ import { getDirections } from '../../services/directionService';
 import { updateTrip } from '../../services/tripService'; // ✅ Import updateTrip
 import { useTripDraftStore } from '../../store/useTripDraftStore';
 import { Colors } from '../../theme/colors';
-
+import { MAX_TRIP_STOPOVERS } from '../../constants/tripLimits';
 // ... (Interface Props remains the same)
 interface Props {
   meetingPoint: LocationPoint | null;
@@ -181,9 +181,14 @@ export function SetLocationsSheet({
           </View>
         </View>
 
-        <TouchableOpacity style={styles.addStopBtn} onPress={onAddStopover}>
-          <Text style={styles.addStopText}>+ Add Stopover</Text>
-        </TouchableOpacity>
+
+      <TouchableOpacity style={styles.addStopBtn} onPress={onAddStopover} activeOpacity={0.7} >
+        <Text style={styles.addStopText}> + Add Stopover</Text>
+      </TouchableOpacity>
+
+      <Text style={styles.stopoverCounter}>
+        {stopovers.length}/{MAX_TRIP_STOPOVERS} stopovers
+      </Text>
 
       </ScrollView>
       <View style={styles.footer}>
@@ -316,5 +321,13 @@ const styles = StyleSheet.create({
   createBtnText: { 
     color: Colors.white, 
     fontSize: 16, 
-    fontWeight: '700' },
+    fontWeight: '700' 
+  },
+  stopoverCounter: {
+  fontSize: 12,
+  color: Colors.muted,
+  textAlign: 'center',
+  marginTop: 8,
+  marginBottom: 8,
+},
 });

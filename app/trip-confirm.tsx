@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, Modal } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTripDraftStore } from '../src/store/useTripDraftStore';
 import { RoutePreviewMap } from '../src/components/trip/RoutePreviewMap';
 import {useAuth} from '../src/hooks/useAuth';
@@ -11,12 +11,15 @@ import { TripCodeModal } from '../src/components/trip/TripCodeModal';
 import { createTrip, updateTrip } from '../src/services/tripService';
 import Slider from '@react-native-community/slider';
 import {Colors} from '../src/theme/colors';
+import { MAX_TRIP_NAME_LENGTH, MAX_TRIP_DESCRIPTION_LENGTH, MAX_TRIP_STOPOVERS } from '../src/constants/tripLimits';
+import { getTrustedTime, getTrustedDate } from '../src/utils/time';
+import { doc, getDoc, getFirestore } from '@react-native-firebase/firestore';
 
 export default function TripConfirmScreen() {
   const router = useRouter();
   const draft = useTripDraftStore();
   const { user } = useAuth();
-const isEditing = !!draft.editingTripId;
+  const isEditing = !!draft.editingTripId;
   const [isRouteVisible, setIsRouteVisible] = useState(true);
   const [isMembersVisible, setIsMembersVisible] = useState(true);
   const [isEditingDesc, setIsEditingDesc] = useState(false);
@@ -40,52 +43,115 @@ const isEditing = !!draft.editingTripId;
     ]);
   };
 
+  const saveTitleEdit = () => {
+    if (!draft.title.trim()) {
+      Alert.alert('Invalid Trip Name', 'Please enter a trip name.');
+      return;
+    }
+    if (draft.title.length > MAX_TRIP_NAME_LENGTH) {
+      Alert.alert('Trip Name Too Long', `Trip names cannot exceed ${MAX_TRIP_NAME_LENGTH} characters.`);
+      return;
+    }
+    draft.setDetails(draft.title.trim(), draft.date, draft.startTime);
+    setIsEditingDetails(false);
+  };
+
+  const saveDescriptionEdit = () => {
+    if (draft.description.length > MAX_TRIP_DESCRIPTION_LENGTH) {
+      Alert.alert('Description Too Long', `Descriptions cannot exceed ${MAX_TRIP_DESCRIPTION_LENGTH} characters.`);
+      return;
+    }
+    draft.setDescription(draft.description.trim());
+    setIsEditingDesc(false);
+  };
+
   const handleConfirm = async () => {
-    if (!draft.meetingPoint || !draft.endPoint || !draft.title) return;
+    const title = draft.title.trim();
+    const description = draft.description.trim();
+    if (!title || title.length > MAX_TRIP_NAME_LENGTH) {
+      Alert.alert('Invalid Trip Name', `Please enter a trip name of up to ${MAX_TRIP_NAME_LENGTH} characters.`);
+      return;
+    }
+    if (description.length > MAX_TRIP_DESCRIPTION_LENGTH) {
+      Alert.alert('Description Too Long', `Descriptions cannot exceed ${MAX_TRIP_DESCRIPTION_LENGTH} characters.`);
+      return;
+    }
+    if (draft.stopovers.length > MAX_TRIP_STOPOVERS) {
+      Alert.alert('Maximum Stopovers Reached', `A trip can only have ${MAX_TRIP_STOPOVERS} stopovers.`);
+      return;
+    }
+    if (!draft.meetingPoint || !draft.endPoint) {
+      Alert.alert('Missing Locations', 'Please select a meeting point and destination.');
+      return;
+    }
+    if (!draft.date || draft.date.getTime() <= getTrustedTime()) {
+      Alert.alert('Invalid Schedule', 'Please choose a future departure date and time.');
+      return;
+    }
 
     setIsCreating(true);
     try {
       if (isEditing) {
-        // ✅ UPDATE EXISTING TRIP
-        await updateTrip(draft.editingTripId!, {
-          title: draft.title,
+        // Recheck the current stored schedule before saving route edits.
+        // Final enforcement should also live in Firestore security rules.
+        const editingTripId = draft.editingTripId!;
+        const savedTrip = await getDoc(doc(getFirestore(), 'trips', editingTripId));
+        if (!savedTrip.exists()) {
+          Alert.alert('Trip Not Found', 'This trip no longer exists.');
+          return;
+        }
+        const data = savedTrip.data();
+        const currentStart = data?.scheduledAt?.toDate?.()?.getTime();
+        if (
+          data?.createdBy !== user?.uid ||
+          data?.status === 'completed' ||
+          data?.status === 'cancelled' ||
+          typeof currentStart !== 'number' ||
+          getTrustedTime() >= currentStart
+        ) {
+          Alert.alert('Editing Unavailable', 'This trip can no longer be edited.');
+          return;
+        }
+
+        await updateTrip(editingTripId, {
+          title,
           scheduledAt: draft.date,
           startTime: draft.startTime,
           meetingPoint: draft.meetingPoint,
+          startPoint: draft.meetingPoint,
           endPoint: draft.endPoint,
           stopovers: draft.stopovers,
           strayThreshold: draft.strayThreshold || 50,
-          description: draft.description,
+          description,
           routeGeometry: draft.routeGeometry,
           totalDistance: draft.totalDistance,
-          routeLegDistances: draft.routeLegDistances
+          routeLegDistances: draft.routeLegDistances,
+          routeLegDurations: draft.routeLegDurations,
         });
-        
-        Alert.alert("Success", "Trip details and route updated!");
         draft.resetDraft();
-        router.replace(`/trip/${draft.editingTripId}`);
+        Alert.alert('Success', 'Trip details and route updated!');
+        router.replace(`/trip/${editingTripId}`);
       } else {
-        // ✅ CREATE NEW TRIP
         const trip = await createTrip({
-          title: draft.title,
+          title,
           scheduledAt: draft.date,
           startTime: draft.startTime,
           meetingPoint: draft.meetingPoint,
           endPoint: draft.endPoint,
           stopovers: draft.stopovers,
           strayThreshold: draft.strayThreshold || 50,
-          description: draft.description,
-          routeGeometry: draft.routeGeometry, // Make sure createTrip saves this too!
-          totalDistance: draft.totalDistance, // Make sure createTrip saves this too!
+          description,
+          routeGeometry: draft.routeGeometry,
+          totalDistance: draft.totalDistance,
           routeLegDistances: draft.routeLegDistances,
           routeLegDurations: draft.routeLegDurations,
-          creatorName: user?.name || user?.email?.split('@')[0] || 'Leader', 
+          creatorName: user?.name || user?.email?.split('@')[0] || 'Leader',
         });
         setCreatedTrip({ id: trip.id, code: trip.shareCode });
       }
     } catch (error) {
-      console.log("Error creating trip:", error);
-      Alert.alert("Error", "Could not create trip.");
+      console.error('Failed to save trip:', error);
+      Alert.alert('Error', 'Could not save trip. Please try again.');
     } finally {
       setIsCreating(false);
     }
@@ -119,23 +185,36 @@ const isEditing = !!draft.editingTripId;
         {/* Map Preview */}
         <RoutePreviewMap onMaximize={() => setShowMaximizedMap(true)} />
 
-        {/* ✅ Ride Details (Editable) */}
+                {/* Ride Details (Editable) */}
         <View style={styles.detailsHeader}>
-          {isEditingDetails ? (
-            <TextInput
-              style={[styles.title, { borderBottomWidth: 1, borderColor: Colors.darkGreen, paddingBottom: 4 }]}
-              value={draft.title}
-              onChangeText={(val) => draft.setDetails(val, draft.date, draft.startTime)}
-            />
-          ) : (
-            <Text style={styles.title}>{draft.title}</Text>
-          )}
-          
-          <TouchableOpacity onPress={() => setIsEditingDetails(!isEditingDetails)}>
+          <View style={styles.tripTitleContainer}>
+            {isEditingDetails ? (
+              <TextInput
+                style={[styles.title, styles.titleEditInput]}
+                value={draft.title}
+                onChangeText={(val) => draft.setDetails(val, draft.date, draft.startTime)}
+                maxLength={MAX_TRIP_NAME_LENGTH}
+                numberOfLines={1}
+              />
+            ) : (
+              <Text style={styles.title} numberOfLines={1} ellipsizeMode="tail">
+                {draft.title}
+              </Text>
+            )}
+          </View>
+          <TouchableOpacity
+            style={styles.headerEditButton}
+            onPress={() => isEditingDetails ? saveTitleEdit() : setIsEditingDetails(true)}
+          >
             <Text style={styles.editText}>{isEditingDetails ? 'Save' : 'Edit'}</Text>
           </TouchableOpacity>
         </View>
-        
+        {isEditingDetails && (
+          <Text style={styles.titleCounter}>
+            {draft.title.length}/{MAX_TRIP_NAME_LENGTH}
+          </Text>
+        )}
+
         <Text style={styles.subText}><Feather name="user" size={14} /> Hosted by You</Text>
         
         {isEditingDetails ? (
@@ -156,9 +235,9 @@ const isEditing = !!draft.editingTripId;
         {/* Date/Time Pickers Modals */}
         {showDatePicker && (
           <DateTimePicker
-            value={draft.date || new Date()}
+            value={draft.date || getTrustedDate()}
             mode="date"
-            minimumDate={new Date()}
+            minimumDate={getTrustedDate()}
             onChange={(event, date) => {
               setShowDatePicker(false);
               if (date) {
@@ -174,7 +253,7 @@ const isEditing = !!draft.editingTripId;
         )}
         {showTimePicker && (
           <DateTimePicker
-            value={draft.date || new Date()}
+            value={draft.date || getTrustedDate()}
             mode="time"
             onChange={(event, date) => {
               setShowTimePicker(false);
@@ -190,7 +269,7 @@ const isEditing = !!draft.editingTripId;
           />
         )}
 
-        {/* Description */}
+                {/* Description */}
         <Text style={styles.sectionLabel}>DESCRIPTION</Text>
         {isEditingDesc ? (
           <View>
@@ -200,10 +279,14 @@ const isEditing = !!draft.editingTripId;
               placeholder="Add a description for this trip..."
               value={draft.description}
               onChangeText={draft.setDescription}
+              maxLength={MAX_TRIP_DESCRIPTION_LENGTH}
               autoFocus
             />
-            <TouchableOpacity style={styles.doneBtn} onPress={() => setIsEditingDesc(false)}>
-              <Text style={styles.doneBtnText}>Done</Text>
+            <Text style={styles.descriptionCounter}>
+             {draft.description.length}/{MAX_TRIP_DESCRIPTION_LENGTH}
+            </Text>
+            <TouchableOpacity style={styles.doneBtn} onPress={saveDescriptionEdit}>
+              <Text style={styles.doneBtnText}>Save</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -214,7 +297,7 @@ const isEditing = !!draft.editingTripId;
           </TouchableOpacity>
         )}
 
-        {/* ✅ Route Section (Fixed Distances) */}
+{/* ✅ Route Section (Fixed Distances) */}
         <View style={styles.routeHeader}>
           <TouchableOpacity style={styles.routeTitleContainer} onPress={() => setIsRouteVisible(!isRouteVisible)}>
             <Feather name={isRouteVisible ? "chevron-up" : "chevron-down"} size={18} color="#111" />
@@ -324,7 +407,7 @@ const isEditing = !!draft.editingTripId;
             <Text style={styles.cancelText}>Cancel</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.confirmBtn} onPress={handleConfirm} disabled={isCreating}>
-            <Text style={styles.confirmText}>{isCreating ? 'Creating...' : 'Confirm'}</Text>
+            <Text style={styles.confirmText}>{isCreating ? 'Saving...' : isEditing ? 'Save Changes' : 'Confirm'}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -380,14 +463,19 @@ const styles = StyleSheet.create({
   },
   detailsHeader: { 
     flexDirection: 'row', 
-    justifyContent: 'space-between', 
     alignItems: 'center', 
+    gap: 8,
     marginTop: 20 
   },
+  tripTitleContainer: { flex: 1, minWidth: 0 },
+  headerEditButton: { paddingHorizontal: 6, paddingVertical: 8 },
+  titleEditInput: { borderBottomWidth: 1, borderColor: Colors.darkGreen, paddingBottom: 4, minWidth: 0 },
+  titleCounter: { fontSize: 11, color: Colors.muted, marginTop: 6 },
   title: { 
     fontSize: 22, 
     fontWeight: '700', 
-    color:  Colors.black 
+    color:  Colors.black,
+    flexShrink: 1,
   },
   editText: { 
     color:  Colors.greenBtn,
@@ -446,7 +534,7 @@ const styles = StyleSheet.create({
   },
   doneBtn: { 
     alignSelf: 'flex-end', 
-    marginTop: 8 
+    marginTop: 4 
   },
   doneBtnText: { 
     color: Colors.greenBtn,   
@@ -590,4 +678,11 @@ const styles = StyleSheet.create({
     color: Colors.offWhite, 
     fontWeight: '600' 
   },
+  descriptionCounter: {
+  fontSize: 11,
+  color: Colors.muted,
+  textAlign: 'right',
+  marginTop: 5,
+  marginBottom: 8,
+},
 });

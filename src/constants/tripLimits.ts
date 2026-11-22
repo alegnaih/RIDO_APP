@@ -1,0 +1,3 @@
+export const MAX_TRIP_NAME_LENGTH = 25;
+export const MAX_TRIP_DESCRIPTION_LENGTH = 200;
+export const MAX_TRIP_STOPOVERS = 5;

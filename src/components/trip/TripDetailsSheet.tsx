@@ -4,6 +4,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, Platform, ScrollVi
 import { Colors } from '../../theme/colors';
 import { Feather } from '@expo/vector-icons';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { MAX_TRIP_NAME_LENGTH } from '../../constants/tripLimits';
 
 interface Props {
   title: string;
@@ -75,14 +76,25 @@ export function TripDetailsSheet({
         <Text style={styles.badgeText}>Leader</Text>
       </View>
 
+
       <Text style={styles.label}>Trip Name</Text>
+
       <TextInput
         style={styles.input}
         placeholder="e.g. Elyu Trip"
         placeholderTextColor={Colors.mediumGray}
         value={title}
         onChangeText={setTitle}
+        maxLength={MAX_TRIP_NAME_LENGTH}
       />
+
+      <View style={styles.characterCounterRow}>
+
+        <Text style={styles.characterCounter}>
+          {title.length}/{MAX_TRIP_NAME_LENGTH}
+        </Text>
+      </View>
+
 
       <View style={styles.row}>
         {/* ── DATE PICKER BUTTON ── */}
@@ -246,4 +258,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
+  
+  characterCounterRow: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  marginTop: -10,
+  marginBottom: 16,
+},
+
+characterCounter: {
+  fontSize: 11,
+  color: Colors.muted,
+},
+
 });

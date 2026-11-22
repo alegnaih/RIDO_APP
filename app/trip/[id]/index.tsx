@@ -19,6 +19,7 @@ import { updateTrip, leaveTrip, transferLeadership } from '../../../src/services
 import { Colors } from '../../../src/theme/colors';
 import { config } from '../../../src/constants/config';
 import { getTrustedTime } from '../../../src/utils/time';
+import { MAX_TRIP_NAME_LENGTH, MAX_TRIP_DESCRIPTION_LENGTH } from '../../../src/constants/tripLimits';
 
 const getWeatherIcon = (condition: string) => {
   switch (condition) {
@@ -93,19 +94,34 @@ export default function TripDetailsScreen() {
       }));
   }, [trip?.members, memberNames, user?.uid]);
 
-  const isLocked = useMemo(() => {
-    if (!trip) return true;
-    if (trip.status === 'completed' || trip.status === 'cancelled') return true;
-    if (!trip.scheduledAt) return false;
-    
-    const scheduledTime = trip.scheduledAt.toDate().getTime();
-    const now = getTrustedTime(); 
-    const gracePeriodMs = 12 * 60 * 60 * 1000; 
-    
-    return now > (scheduledTime + gracePeriodMs);
-  }, [trip]);
 
-  const canEdit = isLeader && !isLocked;
+  // Refresh the server-adjusted clock while this screen is open.
+  // getTrustedTime() uses the offset established by syncServerTime().
+  const [currentTime, setCurrentTime] = useState(() => getTrustedTime());
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(getTrustedTime());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const scheduledTime = trip?.scheduledAt?.toDate().getTime() ?? null;
+  const durationSecs = trip?.routeLegDurations?.reduce((sum, seconds) => sum + seconds, 0) ?? 0;
+  const durationMs = durationSecs * 1000;
+  const endTime = scheduledTime !== null ? scheduledTime + durationMs : null;
+  const isClosed = trip?.status === 'completed' || trip?.status === 'cancelled';
+
+  const isUpcoming =
+    !!trip && trip.status === 'planned' && scheduledTime !== null && currentTime < scheduledTime;
+
+  const isWithinTripDuration =
+    !!trip && !isClosed && scheduledTime !== null && endTime !== null &&
+    durationMs > 0 && currentTime >= scheduledTime && currentTime < endTime;
+
+  const canEdit = !!isLeader && isUpcoming;
+
+  const canEditStrayThreshold = !!isLeader && (isUpcoming || isWithinTripDuration);
 
   // 1. Fetch Trip Data
   useEffect(() => {
@@ -244,49 +260,101 @@ export default function TripDetailsScreen() {
     }
   }, [trip?.id, trip?.scheduledAt]);
 
+
   // --- Save Handlers ---
   const saveDetails = async () => {
     if (!trip || !id) return;
-    try {
-      await updateTrip(id, { title: editTitle, scheduledAt: editDate, startTime: editStartTime });
+    if (!canEdit) {
+      Alert.alert('Editing Unavailable', 'Trip details can only be edited before departure.');
       setIsEditingDetails(false);
-    } catch { Alert.alert("Error", "Failed to update details."); }
+      return;
+    }
+    if (!editTitle.trim()) {
+      Alert.alert('Invalid Trip Name', 'Please enter a trip name.');
+      return;
+    }
+    if (editTitle.length > MAX_TRIP_NAME_LENGTH) {
+      Alert.alert('Trip Name Too Long', `Trip names cannot exceed ${MAX_TRIP_NAME_LENGTH} characters.`);
+      return;
+    }
+    if (!editDate || editDate.getTime() <= getTrustedTime()) {
+      Alert.alert('Invalid Schedule', 'Please choose a future departure date and time.');
+      return;
+    }
+    try {
+      await updateTrip(id, {
+        title: editTitle.trim(),
+        scheduledAt: editDate,
+        startTime: editStartTime,
+      });
+      setIsEditingDetails(false);
+    } catch (error) {
+      console.error('Failed to update trip details:', error);
+      Alert.alert('Error', 'Failed to update details.');
+    }
   };
 
   const saveDescription = async () => {
     if (!trip || !id) return;
-    try {
-      await updateTrip(id, { description: editDesc });
+    if (!canEdit) {
+      Alert.alert('Editing Unavailable', 'Trip details can only be edited before departure.');
       setIsEditingDesc(false);
-    } catch { Alert.alert("Error", "Failed to update description."); }
+      return;
+    }
+    if (editDesc.length > MAX_TRIP_DESCRIPTION_LENGTH) {
+      Alert.alert('Description Too Long', `Descriptions cannot exceed ${MAX_TRIP_DESCRIPTION_LENGTH} characters.`);
+      return;
+    }
+    try {
+      await updateTrip(id, { description: editDesc.trim() });
+      setIsEditingDesc(false);
+    } catch (error) {
+      console.error('Failed to update description:', error);
+      Alert.alert('Error', 'Failed to update description.');
+    }
   };
 
   const saveStrayThreshold = async () => {
     if (!trip || !id) return;
+    if (!canEditStrayThreshold) {
+      Alert.alert('Editing Unavailable', 'The stray alert threshold cannot be changed for this trip.');
+      setIsEditingStray(false);
+      return;
+    }
     try {
       await updateTrip(id, { strayThreshold: editStray });
       setIsEditingStray(false);
-    } catch { Alert.alert("Error", "Failed to update distance."); }
+    } catch (error) {
+      console.error('Failed to update stray threshold:', error);
+      Alert.alert('Error', 'Failed to update distance.');
+    }
   };
 
   const handleEditRoute = () => {
     if (!trip) return;
-    
+    if (!canEdit) {
+      Alert.alert('Editing Unavailable', 'Trip details can only be edited before departure.');
+      return;
+    }
     draft.setEditingTripId(trip.id);
     draft.setDetails(trip.title, trip.scheduledAt?.toDate() || null, trip.startTime || '');
-    draft.setDescription((trip as any).description || '');
-    draft.setStrayThreshold((trip as any).strayThreshold || 50);
+    draft.setDescription(trip.description || '');
+    draft.setStrayThreshold(trip.strayThreshold || 50);
 
     const mappedStops = (trip.stopovers || []).map(s => ({
       name: s.name,
       location: s.location,
       order: s.order,
-      isFromSearch: s.isFromSearch
+      isFromSearch: s.isFromSearch,
     }));
-    
-    draft.setLocations(trip.meetingPoint, mappedStops, trip.endPoint);
-    draft.setRouteData((trip as any).routeGeometry, (trip as any).routeLegDistances, (trip as any).totalDistance, (trip as any).routeLegDurations);
 
+    draft.setLocations(trip.meetingPoint, mappedStops, trip.endPoint);
+    draft.setRouteData(
+      (trip as any).routeGeometry,
+      (trip as any).routeLegDistances,
+      (trip as any).totalDistance,
+      (trip as any).routeLegDurations
+    );
     router.push({ pathname: '/create-trip', params: { mode: 'locations' } });
   };
 
@@ -350,10 +418,6 @@ export default function TripDetailsScreen() {
 
   const startDate = trip.scheduledAt?.toDate() || new Date();
   const dateStr = startDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-
-  const durationSecs = trip.routeLegDurations?.reduce((a: number, b: number) => a + b, 0) || 0;
-  const durationMs = durationSecs * 1000;
-  //const bufferMs = 60 * 60 * 1000; // 1 hour
   const endDate = new Date(startDate.getTime() + durationMs);
 
   const leaderName = (trip.createdByName && trip.createdByName !== 'Rider' && trip.createdByName !== 'Leader')
@@ -389,61 +453,68 @@ export default function TripDetailsScreen() {
           onMaximize={() => setShowMaximizedMap(true)} 
         />
 
-        {/* Ride Details */}
 
-{/* Ride Details */}
-<View style={styles.detailsHeader}>
-  {/* Trip Title */}
-  {isEditingDetails ? (
-    <TextInput
-      style={[styles.title, styles.titleInput]}
-      value={editTitle}
-      onChangeText={setEditTitle}
-      multiline
-    />
-  ) : (
-    <Text style={styles.title}>
-      {trip.title}
-    </Text>
-  )}
 
-  {/* Trip Code and Edit Button */}
-  <View style={styles.tripActionsRow}>
-    <TouchableOpacity
-      style={styles.codeBadge}
-      onPress={() => Clipboard.setStringAsync(trip.shareCode)}
-      activeOpacity={0.7}
-    >
-      <Text style={styles.codeText}>
-        #{trip.shareCode}
-      </Text>
+      {/* Ride Details */}
+      <View style={styles.detailsHeader}>
+        <View style={styles.tripTitleContainer}>
+          {isEditingDetails ? (
+            <TextInput
+              style={[styles.title, styles.titleEditInput]}
+              value={editTitle}
+              onChangeText={setEditTitle}
+              maxLength={MAX_TRIP_NAME_LENGTH}
+              numberOfLines={1}
+            />
+          ) : (
+            <Text
+              style={styles.title}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              {trip.title}
+            </Text>
+          )}
+        </View>
 
-      <Feather
-        name="copy"
-        size={14}
-        color={Colors.greenBtn}
-        style={{ marginLeft: 6 }}
-      />
-    </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.codeBadge}
+          onPress={() => Clipboard.setStringAsync(trip.shareCode)}
+        >
+          <Text style={styles.codeText}>
+            #{trip.shareCode}
+          </Text>
 
-    {canEdit && (
-      <TouchableOpacity
-        style={styles.editButton}
-        onPress={() =>
-          isEditingDetails
-            ? saveDetails()
-            : setIsEditingDetails(true)
-        }
-      >
-        <Text style={styles.editText}>
-          {isEditingDetails ? 'Save' : 'Edit'}
+          <Feather
+            name="copy"
+            size={14}
+            color={Colors.greenBtn}
+            style={{ marginLeft: 6 }}
+          />
+        </TouchableOpacity>
+
+        {canEdit && (
+          <TouchableOpacity
+            style={styles.headerEditButton}
+            onPress={() =>
+              isEditingDetails
+                ? saveDetails()
+                : setIsEditingDetails(true)
+            }
+          >
+            <Text style={styles.editText}>
+              {isEditingDetails ? 'Save' : 'Edit'}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {isEditingDetails && (
+        <Text style={styles.titleCounter}>
+         {editTitle.length}/{MAX_TRIP_NAME_LENGTH}
         </Text>
-      </TouchableOpacity>
-    )}
-  </View>
-</View>
+      )}
 
-        
         <Text style={styles.subText}><Feather name="user" size={14} /> Hosted by {isLeader ? 'You' : leaderName}</Text>
         
         {isEditingDetails ? (
@@ -493,8 +564,11 @@ export default function TripDetailsScreen() {
             <TextInput
               style={styles.descInput} multiline
               placeholder="Add a description..."
-              value={editDesc} onChangeText={setEditDesc} autoFocus
+              value={editDesc} onChangeText={setEditDesc} autoFocus maxLength={MAX_TRIP_DESCRIPTION_LENGTH}
             />
+            <Text style={styles.descriptionCounter}>
+              {editDesc.length}/{MAX_TRIP_DESCRIPTION_LENGTH}
+            </Text>
             <TouchableOpacity style={styles.doneBtn} onPress={saveDescription}>
               <Text style={styles.doneBtnText}>Done</Text>
             </TouchableOpacity>
@@ -598,8 +672,8 @@ export default function TripDetailsScreen() {
             <Text style={styles.sectionLabel}>STRAY ALERT THRESHOLD</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
               <Text style={styles.sliderValue}>{editStray} meters</Text>
-              {canEdit && (
-                <TouchableOpacity onPress={() => isEditingStray ? saveStrayThreshold() : setIsEditingStray(true)}>
+                  {canEditStrayThreshold && (
+                  <TouchableOpacity onPress={() => isEditingStray ? saveStrayThreshold() : setIsEditingStray(true)}>
                   <Text style={styles.editText}>{isEditingStray ? 'Save' : 'Edit'}</Text>
                 </TouchableOpacity>
               )}
@@ -693,21 +767,34 @@ export default function TripDetailsScreen() {
         </View>
       </Modal>
 
-      {/* Footer Buttons */}
-      <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
-        {isLeader ? (
-          canEdit ? (
-            <TouchableOpacity style={styles.startBtn} onPress={() => router.push(`/trip/${trip.id}/live`)}>
-              <Feather name="play" size={16} color={Colors.white} style={{ marginRight: 8 }} />
-              <Text style={styles.startText}>START TRIP NOW</Text>
+
+        {/* Footer Buttons */}
+        <View style={[styles.footer,{ paddingBottom: insets.bottom + 16 },]} >
+          {isWithinTripDuration  ? (
+            // Both leader and member see this during an ongoing trip.
+            <TouchableOpacity style={styles.startBtn1} onPress={() => router.push(`/trip/${trip.id}/live`)}activeOpacity={0.8}>
+              <Feather name="map"size={18} color={Colors.white} style={{ marginLeft: 8 }}/>
+
+              <Text style={styles.startText}>SHARED LIVE MAP ROUTE</Text>
             </TouchableOpacity>
-          ) : null
-        ) : (
-          <TouchableOpacity style={styles.leaveBtn} onPress={handleLeavePress}>
-            <Text style={styles.leaveText}>Leave Trip</Text>
-          </TouchableOpacity>
-        )}
-        
+          ) : isLeader ? (canEdit ? (
+              <TouchableOpacity style={styles.startBtn} onPress={() => router.push(`/trip/${trip.id}/live`)}>
+                <Feather name="play" size={16} color={Colors.white} style={{ marginRight: 8 }}/>
+
+                <Text style={styles.startText}>START TRIP NOW</Text>
+              </TouchableOpacity>
+            ) : null
+            ) : (
+              trip.status !== 'completed' &&
+              trip.status !== 'cancelled' &&
+              currentTime < startDate.getTime() && (
+                <TouchableOpacity style={styles.leaveBtn} onPress={handleLeavePress}>
+                  <Text style={styles.leaveText}> Leave Trip</Text>
+              </TouchableOpacity>
+            )
+          )}
+
+
         <TouchableOpacity style={styles.returnBtn} onPress={() => router.replace('/(tabs)/my-trips')}>
           <Text style={styles.returnText}>Return Home</Text>
         </TouchableOpacity>
@@ -922,17 +1009,17 @@ editButton: {
 codeBadge: {
   flexDirection: 'row',
   alignItems: 'center',
-  alignSelf: 'flex-start',
+  flexShrink: 0,
   backgroundColor: Colors.greenBg,
   paddingHorizontal: 12,
   paddingVertical: 6,
   borderRadius: 20,
-  maxWidth: '100%',
 },
   codeText: {
     fontSize: 14,
     fontWeight: '700',
     color: Colors.greenBtn,
+    flexShrink: 0,
   },
   subText: {
     fontSize: 13,
@@ -979,9 +1066,10 @@ codeBadge: {
     fontWeight: '600',
   },
 detailsHeader: {
-  flexDirection: 'column',
-  alignItems: 'stretch',
-  marginBottom: 8,
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 8,
+  marginTop: 20,
 },
   editText: {
     color: Colors.greenBtn,
@@ -1176,8 +1264,9 @@ detailsHeader: {
     right: 0,
     flexDirection: 'row',
     justifyContent: 'center',
+    alignItems: 'center',
     gap: 12,
-    paddingHorizontal: 20,
+    paddingHorizontal: 12,
     paddingTop: 16,
     backgroundColor: Colors.offWhite,
     borderTopWidth: 1,
@@ -1212,15 +1301,29 @@ detailsHeader: {
   startBtn: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 1,
     paddingVertical: 14,
-    paddingHorizontal: 24,
+    paddingHorizontal: 12,
     borderRadius: 24,
     backgroundColor: Colors.greenBtn,
   },
   startText: {
     color: Colors.offWhite,
     fontWeight: '700',
-    fontSize: 15,
+    fontSize: 14,
+    flexShrink: 1,
+    textAlign: 'center',
+  },
+  startBtn1: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 24,
+    backgroundColor: Colors.greenBtn,
   },
   modalOverlay: {
     flex: 1,
@@ -1263,6 +1366,8 @@ detailsHeader: {
   modalCancelBtn: {
     flex: 1,
     paddingVertical: 12,
+    paddingHorizontal: 10,
+    minHeight: 48,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: Colors.muted,
@@ -1371,4 +1476,37 @@ detailsHeader: {
     fontWeight: '600',
     color: Colors.errorRed,
   },
+
+  tripTitleContainer: {
+  flex: 1,
+  minWidth: 0,
+},
+
+  titleEditInput: {
+    borderBottomWidth: 1,
+    borderColor: Colors.greenBtn,
+    paddingVertical: 2,
+    paddingHorizontal: 0,
+    minWidth: 0,
+  },
+
+  headerEditButton: {
+    flexShrink: 0,
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+  },
+
+  titleCounter: {
+    fontSize: 11,
+    color: Colors.muted,
+    textAlign: 'left',
+    marginTop: 5,
+  },
+descriptionCounter: {
+  fontSize: 11,
+  color: Colors.muted,
+  textAlign: 'right',
+  marginTop: 5,
+  marginBottom: 8,
+},
 });
